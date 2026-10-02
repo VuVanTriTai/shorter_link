@@ -44,11 +44,16 @@ public class UserService {
         userRepository.save(user);
     }
 
-    public AuthResponse login(LoginRequest request) {
+    public String authenticate(LoginRequest request) {
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.username(), request.password())
         );
-        String token = tokenProvider.generateToken(authentication.getName());
+        return authentication.getName();
+    }
+
+    public AuthResponse login(LoginRequest request) {
+        String username = authenticate(request);
+        String token = tokenProvider.generateToken(username);
         return new AuthResponse(token, "Bearer");
     }
 

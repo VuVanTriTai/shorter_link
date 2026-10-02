@@ -1,0 +1,92 @@
+1. Core — Bắt buộc phải có (MVP)
+
+Auth & User
+
+Đăng ký / đăng nhập (đã có)
+Đổi mật khẩu (đã có)
+Refresh token (JWT hiện chỉ có access token, hết hạn là phải login lại — nên cân nhắc thêm refresh token nếu muốn UX tốt hơn)
+
+Link CRUD
+
+Tạo short link từ URL gốc (đã có)
+Custom alias/code do user tự đặt (đã có)
+Sửa URL đích / custom code (đã có)
+Xoá link (đã có)
+Xem danh sách link của user (đã có)
+Redirect từ short code → URL gốc (đã có, nhưng xem mục 3 bên dưới)
+
+Validate URL đích (đã bàn ở câu trước)
+
+Whitelist scheme (http/https)
+Chặn self-redirect loop
+2. Quan trọng — Nên có sớm
+
+Click tracking / Analytics cơ bản
+
+Đếm số lượt click mỗi lần redirect (hiện getOriginalUrl() chưa tăng clickCount — cần bổ sung)
+Thời điểm click gần nhất (lastClickedAt)
+Thống kê theo thời gian (click theo ngày/tuần/tháng) — cần bảng riêng link_clicks (id, link_id, clicked_at, ip, user_agent, referrer) nếu muốn chi tiết hơn là chỉ đếm tổng
+
+Expiration (hết hạn)
+
+Đã có field expiresAt trong entity nhưng chưa có logic check khi redirect — cần bổ sung: nếu expiresAt đã qua thì trả 410 Gone hoặc 404 thay vì redirect
+Job/scheduler tự động deactivate link hết hạn (Spring @Scheduled)
+
+Active/Inactive
+
+Field active đã có nhưng getOriginalUrl() chưa check — user tạm ẩn link mà không xoá hẳn (VD: pause link)
+Khi active = false → redirect trả 404/410
+
+Giới hạn số lượng link / user
+
+Free tier giới hạn bao nhiêu link được tạo (tránh spam/abuse tài nguyên)
+
+Validate custom code
+
+Giới hạn ký tự cho phép (chỉ alphanumeric, không cho ký tự đặc biệt gây lỗi URL)
+Blacklist các từ nhạy cảm/hệ thống (VD: không cho đặt code trùng api, admin, login...)
+Giới hạn độ dài (min/max)
+3. Bảo mật — Không thể bỏ qua nếu định deploy thật
+Rate limiting: chặn spam tạo link hàng loạt (bot), chặn brute-force login
+Malware/Phishing check: tích hợp Google Safe Browsing API trước khi cho tạo link (đã bàn ở câu trước)
+CAPTCHA khi tạo link nếu không đăng nhập (nếu bạn cho phép anonymous tạo link)
+Password reset qua email (hiện chỉ có change password khi đã login, chưa có "quên mật khẩu")
+Email verification khi đăng ký (tránh spam account ảo)
+4. Nâng cao — Tạo điểm nhấn cho project (đẹp cho CV)
+
+QR Code generation
+
+Sinh QR code cho mỗi short link, trả về ảnh hoặc base64 — rất phổ biến trong link shortener thật, code không khó (dùng lib zxing)
+
+Link preview / metadata
+
+Khi tạo link, fetch title + favicon của URL gốc để hiển thị preview (giống Bitly)
+
+Password-protected link
+
+Cho phép user đặt password để bảo vệ link, người click phải nhập password mới được redirect
+
+UTM builder / campaign tracking
+
+Cho phép gắn UTM params khi tạo link, group link theo campaign
+
+Bulk operations
+
+Tạo nhiều short link cùng lúc từ file CSV
+Xoá/deactivate hàng loạt
+
+Public API + API key
+
+Cho phép user tạo API key riêng để tích hợp tạo link qua API từ hệ thống khác (không cần login JWT mỗi lần)
+
+Custom domain
+
+Cho phép user dùng domain riêng của họ thay vì domain mặc định của bạn (tính năng cao cấp, các dịch vụ trả phí như Bitly hay có)
+
+Geo/Device analytics
+
+Thống kê click theo quốc gia, loại thiết bị, trình duyệt (cần parse User-Agent + GeoIP lookup)
+5. Vận hành / kỹ thuật nền (không phải business logic nhưng cần cho production)
+Caching Redis cho short code → URL (bạn đã có Redis trong classpath theo log Spring Data Redis!) — giảm tải DB cho phần redirect vì đây là API được gọi nhiều nhất
+Soft delete thay vì xoá cứng — giữ lịch sử click ngay cả khi user xoá link
+Audit log — ai sửa/xoá link nào, lúc nào

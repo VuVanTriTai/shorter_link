@@ -10,11 +10,12 @@ import com.vvttai.smart_link_shortener.modules.link.entity.Link;
 import com.vvttai.smart_link_shortener.modules.link.repository.LinkRepository;
 import com.vvttai.smart_link_shortener.modules.user.entity.User;
 import com.vvttai.smart_link_shortener.modules.user.repository.UserRepository;
+import com.vvttai.smart_link_shortener.modules.analytics.repository.ClickAnalyticsRepository;
+import com.vvttai.smart_link_shortener.modules.analytics.service.AnalyticsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.security.Principal;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
@@ -32,25 +33,42 @@ public class LinkService {
     private final LinkRepository linkRepository;
     private final UserRepository userRepository;
     private final LinkCacheService linkCacheService;
+    private final UrlValidationService urlValidationService;
+    private final ClickAnalyticsRepository clickAnalyticsRepository;
+    private final AnalyticsService analyticsService;
 
     public LinkService(
             LinkRepository linkRepository,
             UserRepository userRepository,
-            LinkCacheService linkCacheService) {
+            LinkCacheService linkCacheService,
+            UrlValidationService urlValidationService,
+            ClickAnalyticsRepository clickAnalyticsRepository,
+            AnalyticsService analyticsService) {
         this.linkRepository = linkRepository;
         this.userRepository = userRepository;
         this.linkCacheService = linkCacheService;
+        this.urlValidationService = urlValidationService;
+        this.clickAnalyticsRepository = clickAnalyticsRepository;
+        this.analyticsService = analyticsService;
     }
 
     public LinkResponse createShortLink(CreateLinkRequest request, Principal connectedUser) {
+        // 1. Kiểm tra an toàn và xác thực URL đích (Scheme, Self-loop, SSRF,
+        // Reachability, Safe Browsing)
+        urlValidationService.validateUrl(request.originalUrl());
+
         User user = userRepository.findByUsername(connectedUser.getName())
                 .orElseThrow(() -> new IllegalArgumentException("User not found: " + connectedUser.getName()));
         String shortCode;
         if (request.customCode() != null && !request.customCode().isBlank()) {
-            if (linkRepository.existsByShortCode(request.customCode())) {
-                throw new IllegalArgumentException("Custom short code already exists!");
+            String customCode = request.customCode().trim();
+            // 2. Kiểm tra tính hợp lệ của mã custom (ký tự, độ dài, blacklist)
+            urlValidationService.validateCustomCode(customCode);
+
+            if (linkRepository.existsByShortCode(customCode)) {
+                throw new IllegalArgumentException("Mã custom short code này đã tồn tại!");
             }
-            shortCode = request.customCode();
+            shortCode = customCode;
         } else {
             shortCode = generateUniqueShortCode();
         }
@@ -61,6 +79,9 @@ public class LinkService {
 
     @Transactional
     public LinkResponse updateShortLink(String currentShortCode, UpdateLinkRequest request, String username) {
+        // 1. Kiểm tra an toàn và xác thực URL đích mới
+        urlValidationService.validateUrl(request.originalUrl());
+
         // Tìm link theo shortCode hiện tại + kiểm tra chính chủ
         Link link = linkRepository.findByShortCodeAndUserUsername(currentShortCode, username)
                 .orElseThrow(() -> new IllegalArgumentException("Link không tồn tại hoặc bạn không có quyền sửa!"));
@@ -70,13 +91,16 @@ public class LinkService {
 
         // Nếu người dùng muốn đổi sang customCode mới
         if (request.customCode() != null && !request.customCode().isBlank()) {
-            String newCode = request.customCode();
+            String newCode = request.customCode().trim();
+            // 2. Kiểm tra tính hợp lệ của mã custom mới
+            urlValidationService.validateCustomCode(newCode);
+
             if (!newCode.equals(link.getShortCode()) && linkRepository.existsByShortCode(newCode)) {
                 throw new IllegalArgumentException("Mã custom short code này đã tồn tại!");
             }
             link.setShortCode(newCode);
         }
-        
+
         String fullShortUrl = "http://localhost:8080/r/" + link.getShortCode();
         link.setOriginalUrl(request.originalUrl());
         link.setExpiresAt(request.expiresAt());
@@ -88,11 +112,17 @@ public class LinkService {
                 fullShortUrl,
                 link.getClickCount(),
                 link.getCreatedAt(),
-                link.getExpiresAt()
-        );
+                link.getExpiresAt());
     }
 
     public List<LinkResponse> getUserLinks(Principal connectedUser) {
+        // Đẩy ngay các click đang chờ trong Redis buffer vào DB trước khi lấy danh sách
+        try {
+            analyticsService.flushClickBuffer();
+        } catch (Exception e) {
+            log.warn("Failed to flush click buffer before fetching user links: {}", e.getMessage());
+        }
+
         return linkRepository.findByUserUsername(connectedUser.getName())
                 .stream()
                 .map(this::mapToResponse)
@@ -125,12 +155,14 @@ public class LinkService {
 
     private LinkResponse mapToResponse(Link link) {
         String fullShortUrl = "http://localhost:8080/r/" + link.getShortCode();
+        // Luôn dùng click_analytics trong DB làm nguồn sự thật (chính xác 100%)
+        long actualClicks = clickAnalyticsRepository.countByLinkId(link.getId());
         return new LinkResponse(
                 link.getId(),
                 link.getOriginalUrl(),
                 link.getShortCode(),
                 fullShortUrl,
-                link.getClickCount(),
+                actualClicks,
                 link.getCreatedAt(),
                 link.getExpiresAt());
     }
@@ -141,7 +173,8 @@ public class LinkService {
      * 2. Link có bị vô hiệu hóa không -> ném LinkNotFoundException
      * 3. Link có hết hạn chưa -> ném LinkExpiredException
      *
-     * Redis Cache: Check cache trước -> miss thì query DB rồi put vào cache (TTL = 1 giờ).
+     * Redis Cache: Check cache trước -> miss thì query DB rồi put vào cache (TTL =
+     * 1 giờ).
      */
     public Link getLinkByShortCode(String shortCode) {
         // --- 1. Check Redis cache ---
@@ -186,6 +219,34 @@ public class LinkService {
      */
     public String getOriginalUrl(String shortCode) {
         return getLinkByShortCode(shortCode).getOriginalUrl();
+    }
+
+    /**
+     * Lấy link để xem thống kê (Analytics).
+     * Khác với getLinkByShortCode() dùng khi redirect, phương thức này KHÔNG ném LinkExpiredException
+     * khi link đã hết hạn, cho phép người dùng vẫn xem được toàn bộ dữ liệu thống kê của link.
+     */
+    public Link getLinkForStats(String shortCode) {
+        // --- 1. Check Redis cache ---
+        LinkCacheDto cached = linkCacheService.get(shortCode);
+        if (cached != null) {
+            log.debug("Cache HIT for stats: shortCode={}", shortCode);
+            if (!cached.active()) {
+                throw new LinkNotFoundException(shortCode);
+            }
+            return cached.toEntity();
+        }
+
+        // --- 2. Cache MISS -> Query DB ---
+        log.debug("Cache MISS for stats: shortCode={}", shortCode);
+        Link link = linkRepository.findByShortCode(shortCode)
+                .orElseThrow(() -> new LinkNotFoundException(shortCode));
+
+        if (!link.isActive()) {
+            throw new LinkNotFoundException(shortCode);
+        }
+
+        return link;
     }
 
     @Transactional

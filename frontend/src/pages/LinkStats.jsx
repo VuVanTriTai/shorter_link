@@ -267,12 +267,28 @@ export default function LinkStats() {
                                 </div>
                                 <div>
                                     <span className="text-slate-400">Hạn sử dụng:</span>{' '}
-                                    <strong className="text-slate-700 font-medium">
+                                    <strong className={`font-medium ${isExpired ? 'text-rose-600' : 'text-slate-700'}`}>
                                         {stats.expiresAt ? formatDate(stats.expiresAt) : 'Vĩnh viễn'}
+                                        {isExpired && ' (Đã hết hạn)'}
                                     </strong>
                                 </div>
                             </div>
                         </div>
+
+                        {/* Banner thông báo nếu link đã hết hạn */}
+                        {isExpired && (
+                            <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-50/80 border border-amber-200/70 text-amber-900 shadow-sm">
+                                <span className="text-xl shrink-0 mt-0.5">⚠️</span>
+                                <div className="text-sm">
+                                    <p className="font-semibold text-amber-900">
+                                        Link này đã hết hạn sử dụng ({formatDate(stats.expiresAt)})
+                                    </p>
+                                    <p className="text-amber-700/90 text-xs mt-0.5 leading-relaxed">
+                                        Người dùng truy cập link rút gọn sẽ nhận được thông báo hết hạn. Toàn bộ dữ liệu phân tích và lịch sử lượt nhấp trước đây vẫn được lưu trữ đầy đủ bên dưới.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Thẻ thống kê nhanh (Metric Cards) */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

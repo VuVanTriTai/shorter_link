@@ -3,6 +3,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import CreateLink from './pages/CreateLink';
+import EditLink from './pages/EditLink';
 import LinkStats from './pages/LinkStats';
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/links/new" element={<CreateLink />} />
+          <Route path="/links/:shortCode/edit" element={<EditLink />} />
           <Route path="/links/:shortCode/stats" element={<LinkStats />} />
         </Routes>
       </BrowserRouter>

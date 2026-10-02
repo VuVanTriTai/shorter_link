@@ -19,7 +19,7 @@ public class JwtTokenProvider {
     @Value("${jwt.secret:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}")
     private String jwtSecret;
 
-    @Value("${jwt.expiration:86400000}")
+    @Value("${jwt.access-token-expiration:${jwt.expiration:900000}}")
     private long jwtExpiration;
 
     private SecretKey getSigningKey() {
@@ -30,7 +30,7 @@ public class JwtTokenProvider {
     }
 
     private long getExpirationTime() {
-        return jwtExpiration > 0 ? jwtExpiration : 86400000L;
+        return jwtExpiration > 0 ? jwtExpiration : 900000L;
     }
 
     public String generateToken(String username) {

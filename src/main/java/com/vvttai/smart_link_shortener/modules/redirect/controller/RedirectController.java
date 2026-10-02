@@ -71,7 +71,12 @@ public class RedirectController {
         // --- Thực hiện Redirect 302 ---
         HttpHeaders headers = new HttpHeaders();
         headers.setLocation(URI.create(link.getOriginalUrl()));
+        ////////
+        headers.setCacheControl(org.springframework.http.CacheControl.noCache().noStore().mustRevalidate());
+        headers.setPragma("no-cache");
+        headers.setExpires(0);
         return new ResponseEntity<>(headers, HttpStatus.FOUND);
+        ////////
     }
 
     private String extractClientIp(HttpServletRequest request) {

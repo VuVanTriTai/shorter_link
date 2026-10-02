@@ -39,8 +39,13 @@ public class ClickAnalytics {
 
     public ClickAnalytics(Link link, String ipAddress, String userAgent, String referrer, String deviceType,
             String country) {
+        this(link, LocalDateTime.now(), ipAddress, userAgent, referrer, deviceType, country);
+    }
+
+    public ClickAnalytics(Link link, LocalDateTime clickedAt, String ipAddress, String userAgent, String referrer, String deviceType,
+            String country) {
         this.link = link;
-        this.clickedAt = LocalDateTime.now();
+        this.clickedAt = clickedAt != null ? clickedAt : LocalDateTime.now();
         this.ipAddress = ipAddress;
         this.userAgent = userAgent;
         this.referrer = referrer;

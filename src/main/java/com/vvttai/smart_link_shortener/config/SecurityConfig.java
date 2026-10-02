@@ -34,6 +34,8 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**", "/auth/**", "/r/**", "/error").permitAll()
+                        // QR endpoints — public (PNG embed) + base64 (axios with token)
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/qr/**").permitAll()
                         .requestMatchers("/api/links/**", "/api/links").authenticated()
                         .anyRequest().authenticated()
                 )
