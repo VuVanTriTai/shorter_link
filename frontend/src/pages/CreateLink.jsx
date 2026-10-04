@@ -68,7 +68,7 @@ export default function CreateLink() {
 
     const getShortUrl = (link) => {
         if (!link) return '';
-        return link.fullShortUrl || link.fullShortCode || `http://localhost:8080/r/${link.shortCode}`;
+        return link.fullShortUrl || link.fullShortCode || `${import.meta.env.VITE_API_URL || 'http://localhost:8080'}/r/${link.shortCode}`;
     };
 
     const handleCopy = async () => {
@@ -192,7 +192,7 @@ export default function CreateLink() {
                             </label>
                             <div className="flex rounded-lg shadow-sm">
                                 <span className="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-sm">
-                                    http://localhost:8080/r/
+                                    {import.meta.env.VITE_API_URL || 'http://localhost:8080'}/r/
                                 </span>
                                 <input
                                     id="customCode"

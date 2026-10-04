@@ -34,4 +34,20 @@ public class AnalyticsController {
         LinkStatsResponse response = analyticsService.getLinkStats(link);
         return ResponseEntity.ok(response);
     }
+
+    @GetMapping({"/api/links/{shortCode}/clicks", "/r/{shortCode}/clicks"})
+    public ResponseEntity<?> getLinkClicks(
+            @PathVariable String shortCode,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        try {
+            analyticsService.flushClickBuffer();
+        } catch (Exception e) {
+            log.warn("Failed to flush click buffer before fetching clicks: {}", e.getMessage());
+        }
+        Link link = linkService.getLinkForStats(shortCode);
+        size = Math.min(Math.max(size, 5), 100);
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size);
+        return ResponseEntity.ok(analyticsService.getPaginatedClicks(link, pageable));
+    }
 }

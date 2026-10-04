@@ -8,6 +8,7 @@ public record LinkResponse (
         String shortCode,
         String fullShortCode,//Url đầy đủ để coppy luôn
         Long clickCount,
+        boolean active,
         LocalDateTime createdAt,
         LocalDateTime expiresAt
 ){

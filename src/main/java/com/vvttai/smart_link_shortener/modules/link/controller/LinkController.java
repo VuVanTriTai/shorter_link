@@ -68,4 +68,24 @@ public class LinkController {
         return ResponseEntity.ok(response);
     }
 
+    @PatchMapping("/{id}/active")
+    public ResponseEntity<LinkResponse> setActive(
+            @PathVariable Long id,
+            @RequestParam(required = false) Boolean active,
+            @RequestBody(required = false) java.util.Map<String, Boolean> body,
+            Principal connectedUser) {
+        Boolean targetActive = active;
+        if (targetActive == null && body != null && body.containsKey("active")) {
+            targetActive = body.get("active");
+        }
+
+        LinkResponse response;
+        if (targetActive != null) {
+            response = linkService.setActive(id, targetActive, connectedUser.getName());
+        } else {
+            response = linkService.toggleActive(id, connectedUser.getName());
+        }
+        return ResponseEntity.ok(response);
+    }
+
 }

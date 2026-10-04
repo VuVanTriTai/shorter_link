@@ -7,6 +7,7 @@ export default function EditLink() {
     const [originalUrl, setOriginalUrl] = useState('');
     const [customCode, setCustomCode] = useState('');
     const [expiresAt, setExpiresAt] = useState('');
+    const [active, setActive] = useState(true);
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState('');
@@ -34,6 +35,7 @@ export default function EditLink() {
             } else {
                 setOriginalUrl(found.originalUrl || '');
                 setCustomCode(found.shortCode || '');
+                setActive(found.active !== false);
                 if (found.expiresAt) {
                     // Backend trả về LocalDateTime dạng "2026-10-01T23:00:00" (không có timezone)
                     // Cắt trực tiếp 16 ký tự đầu để lấy YYYY-MM-DDTHH:mm (KHÔNG qua new Date() để tránh UTC offset)
@@ -77,6 +79,7 @@ export default function EditLink() {
             // Gửi thẳng chuỗi datetime-local (YYYY-MM-DDTHH:mm) không chuyển sang ISO UTC
             // để tránh bị lệch múi giờ (VN = UTC+7, new Date().toISOString() sẽ trừ đi 7 tiếng)
             expiresAt: expiresAt || null,
+            active: active,
         };
 
         setSubmitting(true);
@@ -157,7 +160,7 @@ export default function EditLink() {
                             </label>
                             <div className="flex rounded-lg shadow-sm">
                                 <span className="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-sm">
-                                    http://localhost:8080/r/
+                                    {import.meta.env.VITE_API_URL || 'http://localhost:8080'}/r/
                                 </span>
                                 <input
                                     type="text"
@@ -185,6 +188,32 @@ export default function EditLink() {
                             <p className="mt-1 text-xs text-gray-500">
                                 Để trống nếu muốn liên kết tồn tại vĩnh viễn (không hết hạn).
                             </p>
+                        </div>
+
+                        {/* Trạng thái hoạt động (Active Toggle) */}
+                        <div className="flex items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                            <div>
+                                <label htmlFor="active-toggle" className="text-sm font-medium text-gray-800 block cursor-pointer">
+                                    Trạng thái hoạt động (Active)
+                                </label>
+                                <span className="text-xs text-gray-500">
+                                    {active ? '🟢 Liên kết đang bật và sẵn sàng chuyển hướng.' : '⏸️ Liên kết đang tắt, người truy cập sẽ nhận thông báo tạm ngưng.'}
+                                </span>
+                            </div>
+                            <button
+                                type="button"
+                                id="active-toggle"
+                                onClick={() => setActive(!active)}
+                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                    active ? 'bg-blue-600' : 'bg-gray-300'
+                                }`}
+                            >
+                                <span
+                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                        active ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                                />
+                            </button>
                         </div>
 
                         <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">

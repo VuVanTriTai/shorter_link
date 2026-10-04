@@ -72,15 +72,43 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("message", "Logged out successfully"));
     }
 
+    /**
+     * Đăng nhập/Đăng ký bằng Google OAuth 2.0.
+     * Frontend gửi Google ID Token (lấy từ Google Identity Services SDK).
+     * Backend xác minh token → tìm/tạo user → trả JWT.
+     */
+    @PostMapping("/google")
+    public ResponseEntity<?> loginWithGoogle(@RequestBody Map<String, String> body, HttpServletResponse response) {
+        try {
+            String idToken = body.get("idToken");
+            if (idToken == null || idToken.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("message", "Google ID Token is required"));
+            }
+
+            AuthTokens tokens = authService.loginWithGoogle(idToken);
+            setRefreshTokenCookie(response, tokens.refreshToken(), authService.getRefreshTokenExpirationSeconds());
+            return ResponseEntity.ok(new AuthResponse(tokens.accessToken(), "Bearer"));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "message", "Đăng nhập bằng Google thất bại: " + (e.getMessage() != null ? e.getMessage() : "Lỗi không xác định")
+            ));
+        }
+    }
+
     @PostMapping("/change-password")
     public ResponseEntity<?> changePassword(@RequestBody ChangePasswordRequest request, Principal connectedUser) {
+        if (connectedUser == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Vui lòng đăng nhập để thực hiện!"));
+        }
         try {
             authService.changePassword(request, connectedUser);
-            return ResponseEntity.ok("Password changed successfully");
+            return ResponseEntity.ok(Map.of("message", "Đổi mật khẩu thành công!"));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("An error occurred: " + e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("message", "Có lỗi xảy ra: " + e.getMessage()));
         }
     }
 

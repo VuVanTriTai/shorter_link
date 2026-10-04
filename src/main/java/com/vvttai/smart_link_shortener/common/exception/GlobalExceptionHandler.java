@@ -25,6 +25,13 @@ public class GlobalExceptionHandler {
                 .body(Map.of("message", e.getMessage()));
     }
 
+    @ExceptionHandler(LinkInactiveException.class)
+    public ResponseEntity<Map<String, String>> handleLinkInactive(LinkInactiveException e) {
+        // 403 Forbidden: link đang tạm dừng hoạt động bởi người dùng
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Map.of("message", e.getMessage()));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<String> handleIllegalArgument(IllegalArgumentException e) {
         return ResponseEntity.badRequest().body(e.getMessage());

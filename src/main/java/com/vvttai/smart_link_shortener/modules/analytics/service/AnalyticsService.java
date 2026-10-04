@@ -200,6 +200,7 @@ public class AnalyticsService {
                 link.getShortCode(),
                 link.getOriginalUrl(),
                 totalClicks,
+                link.isActive(),
                 link.getCreatedAt(),
                 link.getExpiresAt(),
                 dailyClicks,
@@ -208,5 +209,19 @@ public class AnalyticsService {
                 referrerStats,
                 recentClicks
         );
+    }
+
+    public org.springframework.data.domain.Page<LinkStatsResponse.RecentClickDto> getPaginatedClicks(
+            Link link,
+            org.springframework.data.domain.Pageable pageable) {
+        return clickAnalyticsRepository.findByLinkIdOrderByClickedAtDesc(link.getId(), pageable)
+                .map(c -> new LinkStatsResponse.RecentClickDto(
+                        c.getClickedAt(),
+                        c.getIpAddress(),
+                        c.getDeviceType() != null && !c.getDeviceType().isBlank() ? c.getDeviceType() : "Desktop",
+                        c.getCountry() != null && !c.getCountry().isBlank() ? c.getCountry() : "VN",
+                        c.getReferrer() != null && !c.getReferrer().isBlank() ? c.getReferrer() : "Direct",
+                        c.getUserAgent()
+                ));
     }
 }

@@ -7,6 +7,9 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.security.Keys;
 import io.jsonwebtoken.security.SignatureException;
+import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -16,17 +19,32 @@ import java.util.Date;
 
 @Component
 public class JwtTokenProvider {
-    @Value("${jwt.secret:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}")
+
+    private static final Logger log = LoggerFactory.getLogger(JwtTokenProvider.class);
+
+    @Value("${jwt.secret}")
     private String jwtSecret;
 
     @Value("${jwt.access-token-expiration:${jwt.expiration:900000}}")
     private long jwtExpiration;
 
-    private SecretKey getSigningKey() {
-        String secret = (jwtSecret != null && !jwtSecret.isBlank())
-                ? jwtSecret.trim()
-                : "404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970";
-        return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+    private SecretKey signingKey;
+
+    @PostConstruct
+    public void init() {
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalStateException(
+                "❌ JWT_SECRET chưa được cấu hình! " +
+                "Hãy đặt biến môi trường JWT_SECRET hoặc cấu hình jwt.secret trong application.properties"
+            );
+        }
+        if (jwtSecret.length() < 32) {
+            throw new IllegalStateException(
+                "❌ JWT_SECRET quá ngắn! Cần ít nhất 32 ký tự để đảm bảo bảo mật."
+            );
+        }
+        this.signingKey = Keys.hmacShaKeyFor(jwtSecret.trim().getBytes(StandardCharsets.UTF_8));
+        log.info("✅ JWT được cấu hình thành công (secret length: {} chars)", jwtSecret.length());
     }
 
     private long getExpirationTime() {
@@ -41,13 +59,13 @@ public class JwtTokenProvider {
                 .subject(username)
                 .issuedAt(now)
                 .expiration(expiryDate)
-                .signWith(getSigningKey())
+                .signWith(signingKey)
                 .compact();
     }
 
     public String getUsernameFromToken(String token) {
         return Jwts.parser()
-                .verifyWith(getSigningKey())
+                .verifyWith(signingKey)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload()
@@ -57,18 +75,18 @@ public class JwtTokenProvider {
     public boolean validateToken(String token) {
         try {
             Jwts.parser()
-                    .verifyWith(getSigningKey())
+                    .verifyWith(signingKey)
                     .build()
                     .parseSignedClaims(token);
             return true;
         } catch (SignatureException e) {
-            System.err.println("=== Lỗi: Chữ ký Token không hợp lệ ===");
+            log.warn("Chữ ký Token không hợp lệ");
         } catch (MalformedJwtException e) {
-            System.err.println("=== Lỗi: Cấu trúc Token không đúng định dạng ===");
+            log.warn("Cấu trúc Token không đúng định dạng");
         } catch (ExpiredJwtException e) {
-            System.err.println("=== Lỗi: Token đã hết hạn ===");
+            log.warn("Token đã hết hạn");
         } catch (JwtException | IllegalArgumentException e) {
-            System.err.println("=== Lỗi Token: " + e.getMessage());
+            log.warn("Lỗi Token: {}", e.getMessage());
         }
         return false;
     }

@@ -1,6 +1,7 @@
 package com.vvttai.smart_link_shortener.modules.link.service;
 
 import com.vvttai.smart_link_shortener.common.exception.LinkExpiredException;
+import com.vvttai.smart_link_shortener.common.exception.LinkInactiveException;
 import com.vvttai.smart_link_shortener.common.exception.LinkNotFoundException;
 import com.vvttai.smart_link_shortener.modules.link.dto.CreateLinkRequest;
 import com.vvttai.smart_link_shortener.modules.link.dto.LinkCacheDto;
@@ -104,6 +105,9 @@ public class LinkService {
         String fullShortUrl = "http://localhost:8080/r/" + link.getShortCode();
         link.setOriginalUrl(request.originalUrl());
         link.setExpiresAt(request.expiresAt());
+        if (request.active() != null) {
+            link.setActive(request.active());
+        }
 
         return new LinkResponse(
                 link.getId(),
@@ -111,6 +115,7 @@ public class LinkService {
                 link.getShortCode(),
                 fullShortUrl,
                 link.getClickCount(),
+                link.isActive(),
                 link.getCreatedAt(),
                 link.getExpiresAt());
     }
@@ -163,6 +168,7 @@ public class LinkService {
                 link.getShortCode(),
                 fullShortUrl,
                 actualClicks,
+                link.isActive(),
                 link.getCreatedAt(),
                 link.getExpiresAt());
     }
@@ -183,7 +189,7 @@ public class LinkService {
             log.debug("Cache HIT: shortCode={}", shortCode);
             // Validate trạng thái từ cache
             if (!cached.active()) {
-                throw new LinkNotFoundException(shortCode);
+                throw new LinkInactiveException(shortCode);
             }
             if (cached.expiresAt() != null && LocalDateTime.now().isAfter(cached.expiresAt())) {
                 linkCacheService.evict(shortCode); // Xóa cache link hết hạn
@@ -199,7 +205,9 @@ public class LinkService {
 
         // Kiểm tra link có bị tắt không
         if (!link.isActive()) {
-            throw new LinkNotFoundException(shortCode);
+            // Cache trạng thái để chống spam DB
+            linkCacheService.put(link);
+            throw new LinkInactiveException(shortCode);
         }
 
         // Kiểm tra link có hết hạn không
@@ -223,30 +231,21 @@ public class LinkService {
 
     /**
      * Lấy link để xem thống kê (Analytics).
-     * Khác với getLinkByShortCode() dùng khi redirect, phương thức này KHÔNG ném LinkExpiredException
-     * khi link đã hết hạn, cho phép người dùng vẫn xem được toàn bộ dữ liệu thống kê của link.
+     * Khác với getLinkByShortCode() dùng khi redirect, phương thức này KHÔNG ném ngoại lệ
+     * khi link đã hết hạn hoặc tạm tắt, cho phép người dùng vẫn xem được toàn bộ dữ liệu thống kê của link.
      */
     public Link getLinkForStats(String shortCode) {
         // --- 1. Check Redis cache ---
         LinkCacheDto cached = linkCacheService.get(shortCode);
         if (cached != null) {
             log.debug("Cache HIT for stats: shortCode={}", shortCode);
-            if (!cached.active()) {
-                throw new LinkNotFoundException(shortCode);
-            }
             return cached.toEntity();
         }
 
         // --- 2. Cache MISS -> Query DB ---
         log.debug("Cache MISS for stats: shortCode={}", shortCode);
-        Link link = linkRepository.findByShortCode(shortCode)
+        return linkRepository.findByShortCode(shortCode)
                 .orElseThrow(() -> new LinkNotFoundException(shortCode));
-
-        if (!link.isActive()) {
-            throw new LinkNotFoundException(shortCode);
-        }
-
-        return link;
     }
 
     @Transactional
@@ -263,6 +262,38 @@ public class LinkService {
         linkRepository.save(link);
 
         // Xóa cache vì TTL đã thay đổi
+        linkCacheService.evict(link.getShortCode());
+
+        return mapToResponse(link);
+    }
+
+    @Transactional
+    public LinkResponse setActive(Long linkId, boolean active, String username) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found: " + username));
+        Link link = linkRepository.findByIdAndUserId(linkId, user.getId())
+                .orElseThrow(() -> new RuntimeException("Link không tồn tại hoặc bạn không có quyền sửa!"));
+
+        link.setActive(active);
+        linkRepository.save(link);
+
+        // Xóa cache trong Redis để trạng thái mới có hiệu lực ngay
+        linkCacheService.evict(link.getShortCode());
+
+        return mapToResponse(link);
+    }
+
+    @Transactional
+    public LinkResponse toggleActive(Long linkId, String username) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found: " + username));
+        Link link = linkRepository.findByIdAndUserId(linkId, user.getId())
+                .orElseThrow(() -> new RuntimeException("Link không tồn tại hoặc bạn không có quyền sửa!"));
+
+        link.setActive(!link.isActive());
+        linkRepository.save(link);
+
+        // Xóa cache trong Redis để trạng thái mới có hiệu lực ngay
         linkCacheService.evict(link.getShortCode());
 
         return mapToResponse(link);

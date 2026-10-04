@@ -8,6 +8,7 @@ public record LinkStatsResponse(
         String shortCode,
         String originalUrl,
         long totalClicks,
+        boolean active,
         LocalDateTime createdAt,
         LocalDateTime expiresAt,
         List<DailyClickStats> dailyClicks,

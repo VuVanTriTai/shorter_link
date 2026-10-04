@@ -1,6 +1,8 @@
 package com.vvttai.smart_link_shortener.modules.analytics.repository;
 
 import com.vvttai.smart_link_shortener.modules.analytics.entity.ClickAnalytics;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -16,6 +18,8 @@ public interface ClickAnalyticsRepository extends JpaRepository<ClickAnalytics, 
     List<ClickAnalytics> findByLinkId(@Param("linkId") Long linkId);
 
     List<ClickAnalytics> findTop30ByLinkIdOrderByClickedAtDesc(Long linkId);
+
+    Page<ClickAnalytics> findByLinkIdOrderByClickedAtDesc(Long linkId, Pageable pageable);
 
     @Query("SELECT c FROM ClickAnalytics c WHERE c.link.id = :linkId and c.clickedAt BETWEEN :from and :to")
     List<ClickAnalytics> findByLinkIdAndDateRange(

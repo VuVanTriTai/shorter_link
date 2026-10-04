@@ -1,0 +1,13 @@
+target/
+.git/
+.idea/
+.vscode/
+frontend/
+node_modules/
+*.env
+*.env.local
+.env.example
+*.iml
+*.ipr
+*.iws
+HELP.md
