@@ -129,7 +129,7 @@ export default function Dashboard() {
     };
 
     const getShortUrl = (link) => {
-        return link.fullShortUrl || link.fullShortCode || `${import.meta.env.VITE_API_URL || 'http://localhost:8080'}/r/${link.shortCode}`;
+        return link.fullShortUrl || link.fullShortCode || `${window.location.origin}/r/${link.shortCode}`;
     };
 
     const handleDelete = async (id) => {
