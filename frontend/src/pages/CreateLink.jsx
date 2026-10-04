@@ -68,7 +68,7 @@ export default function CreateLink() {
 
     const getShortUrl = (link) => {
         if (!link) return '';
-        return link.fullShortUrl || link.fullShortCode || `${window.location.origin}/r/${link.shortCode}`;
+        return `${window.location.origin}/r/${link.shortCode}`;
     };
 
     const handleCopy = async () => {

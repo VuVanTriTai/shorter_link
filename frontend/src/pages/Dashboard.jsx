@@ -129,7 +129,8 @@ export default function Dashboard() {
     };
 
     const getShortUrl = (link) => {
-        return link.fullShortUrl || link.fullShortCode || `${window.location.origin}/r/${link.shortCode}`;
+        if (!link) return '';
+        return `${window.location.origin}/r/${link.shortCode}`;
     };
 
     const handleDelete = async (id) => {

@@ -102,7 +102,7 @@ public class LinkService {
             link.setShortCode(newCode);
         }
 
-        String fullShortUrl = "http://localhost:8080/r/" + link.getShortCode();
+        String fullShortUrl = "/r/" + link.getShortCode();
         link.setOriginalUrl(request.originalUrl());
         link.setExpiresAt(request.expiresAt());
         if (request.active() != null) {
@@ -159,7 +159,7 @@ public class LinkService {
     }
 
     private LinkResponse mapToResponse(Link link) {
-        String fullShortUrl = "http://localhost:8080/r/" + link.getShortCode();
+        String fullShortUrl = "/r/" + link.getShortCode();
         // Luôn dùng click_analytics trong DB làm nguồn sự thật (chính xác 100%)
         long actualClicks = clickAnalyticsRepository.countByLinkId(link.getId());
         return new LinkResponse(
