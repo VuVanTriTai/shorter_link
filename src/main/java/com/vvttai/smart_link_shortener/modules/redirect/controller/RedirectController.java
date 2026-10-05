@@ -32,7 +32,10 @@ public class RedirectController {
     }
 
     @GetMapping("/r/{shortCode}")
-    public ResponseEntity<?> redirect(@PathVariable String shortCode, HttpServletRequest request) {
+    public ResponseEntity<?> redirect(
+            @PathVariable String shortCode,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String pass,
+            HttpServletRequest request) {
         // --- Trích xuất & chuẩn hoá IP ---
         String rawIp = extractClientIp(request);
         String ipAddress = RateLimiterService.normalizeIp(rawIp);
@@ -50,11 +53,24 @@ public class RedirectController {
                             "retryAfterSeconds", 10));
         }
 
-        // --- Lấy thông tin Link từ DB ---
+        // --- Lấy thông tin Link từ DB / Cache ---
         Link link = linkService.getLinkByShortCode(shortCode);
 
-        // Tầng 0: ALLOWED → redirect + ghi analytics --- Ghi nhận Analytics (chỉ khi
-        // ALLOWED, không ghi khi ALLOWED_WITHOUT_ANALYTICS) ---
+        // --- Kiểm tra mật khẩu bảo vệ ---
+        if (link.hasPassword()) {
+            boolean passwordMatched = pass != null && linkService.verifyPassword(link, pass);
+            if (!passwordMatched) {
+                // Chưa nhập mật khẩu hoặc sai -> Chuyển hướng sang trang nhập mật khẩu của React
+                HttpHeaders headers = new HttpHeaders();
+                headers.setLocation(URI.create("/protect/" + shortCode));
+                headers.setCacheControl(org.springframework.http.CacheControl.noCache().noStore().mustRevalidate());
+                headers.setPragma("no-cache");
+                headers.setExpires(0);
+                return new ResponseEntity<>(headers, HttpStatus.FOUND);
+            }
+        }
+
+        // Tầng 0: ALLOWED → redirect + ghi analytics
         if (action == RateLimitAction.ALLOWED) {
             String userAgent = request.getHeader("User-Agent");
             String referrer = request.getHeader("Referer");
@@ -65,18 +81,68 @@ public class RedirectController {
 
             analyticsService.recordClick(link, ipAddress, userAgent, referrer, deviceType, country);
         }
-        // Tầng 2 (ALLOWED_WITHOUT_ANALYTICS): Vẫn redirect nhưng không ghi log -> chống
-        // spam click tặc
 
         // --- Thực hiện Redirect 302 ---
         HttpHeaders headers = new HttpHeaders();
         headers.setLocation(URI.create(link.getOriginalUrl()));
-        ////////
         headers.setCacheControl(org.springframework.http.CacheControl.noCache().noStore().mustRevalidate());
         headers.setPragma("no-cache");
         headers.setExpires(0);
         return new ResponseEntity<>(headers, HttpStatus.FOUND);
-        ////////
+    }
+
+    @GetMapping("/r/{shortCode}/info")
+    public ResponseEntity<?> getLinkInfo(@PathVariable String shortCode) {
+        Link link = linkService.getLinkByShortCode(shortCode);
+        return ResponseEntity.ok(Map.of(
+                "shortCode", link.getShortCode(),
+                "hasPassword", link.hasPassword()
+        ));
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/r/{shortCode}/unlock")
+    public ResponseEntity<?> unlockLink(
+            @PathVariable String shortCode,
+            @org.springframework.web.bind.annotation.RequestBody Map<String, String> body,
+            HttpServletRequest request) {
+        String rawIp = extractClientIp(request);
+        String ipAddress = RateLimiterService.normalizeIp(rawIp);
+
+        // Chống brute-force mật khẩu bằng Rate Limiter
+        RateLimitAction action = rateLimiterService.checkAndIncrement(ipAddress, "unlock:" + shortCode);
+        if (action == RateLimitAction.BLOCKED) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of(
+                    "error", "Too Many Requests",
+                    "message", "Bạn đã thử sai quá nhiều lần. Vui lòng chờ 10 giây rồi thử lại.",
+                    "retryAfterSeconds", 10
+            ));
+        }
+
+        Link link = linkService.getLinkByShortCode(shortCode);
+        String password = body != null ? body.getOrDefault("password", "") : "";
+
+        if (!linkService.verifyPassword(link, password)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                    "success", false,
+                    "message", "Mật khẩu không chính xác. Vui lòng kiểm tra lại!"
+            ));
+        }
+
+        // Mật khẩu đúng -> Ghi nhận lượt click analytics
+        if (action == RateLimitAction.ALLOWED) {
+            String userAgent = request.getHeader("User-Agent");
+            String referrer = request.getHeader("Referer");
+            if (referrer == null)
+                referrer = request.getHeader("Referrer");
+            String deviceType = (userAgent != null && userAgent.contains("Mobile")) ? "Mobile" : "Desktop";
+            String country = request.getLocale().getCountry();
+            analyticsService.recordClick(link, ipAddress, userAgent, referrer, deviceType, country);
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "originalUrl", link.getOriginalUrl()
+        ));
     }
 
     private String extractClientIp(HttpServletRequest request) {

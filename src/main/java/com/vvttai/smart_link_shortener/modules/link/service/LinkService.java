@@ -15,6 +15,7 @@ import com.vvttai.smart_link_shortener.modules.analytics.repository.ClickAnalyti
 import com.vvttai.smart_link_shortener.modules.analytics.service.AnalyticsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.security.Principal;
@@ -37,6 +38,7 @@ public class LinkService {
     private final UrlValidationService urlValidationService;
     private final ClickAnalyticsRepository clickAnalyticsRepository;
     private final AnalyticsService analyticsService;
+    private final PasswordEncoder passwordEncoder;
 
     public LinkService(
             LinkRepository linkRepository,
@@ -44,13 +46,15 @@ public class LinkService {
             LinkCacheService linkCacheService,
             UrlValidationService urlValidationService,
             ClickAnalyticsRepository clickAnalyticsRepository,
-            AnalyticsService analyticsService) {
+            AnalyticsService analyticsService,
+            PasswordEncoder passwordEncoder) {
         this.linkRepository = linkRepository;
         this.userRepository = userRepository;
         this.linkCacheService = linkCacheService;
         this.urlValidationService = urlValidationService;
         this.clickAnalyticsRepository = clickAnalyticsRepository;
         this.analyticsService = analyticsService;
+        this.passwordEncoder = passwordEncoder;
     }
 
     public LinkResponse createShortLink(CreateLinkRequest request, Principal connectedUser) {
@@ -74,6 +78,9 @@ public class LinkService {
             shortCode = generateUniqueShortCode();
         }
         Link link = new Link(request.originalUrl(), shortCode, user);
+        if (request.password() != null && !request.password().trim().isEmpty()) {
+            link.setPassword(passwordEncoder.encode(request.password().trim()));
+        }
         linkRepository.save(link);
         return mapToResponse(link);
     }
@@ -109,6 +116,13 @@ public class LinkService {
             link.setActive(request.active());
         }
 
+        // Cập nhật mật khẩu bảo vệ
+        if (Boolean.TRUE.equals(request.removePassword())) {
+            link.setPassword(null);
+        } else if (request.password() != null && !request.password().trim().isEmpty()) {
+            link.setPassword(passwordEncoder.encode(request.password().trim()));
+        }
+
         return new LinkResponse(
                 link.getId(),
                 link.getOriginalUrl(),
@@ -117,7 +131,8 @@ public class LinkService {
                 link.getClickCount(),
                 link.isActive(),
                 link.getCreatedAt(),
-                link.getExpiresAt());
+                link.getExpiresAt(),
+                link.hasPassword());
     }
 
     public List<LinkResponse> getUserLinks(Principal connectedUser) {
@@ -170,7 +185,22 @@ public class LinkService {
                 actualClicks,
                 link.isActive(),
                 link.getCreatedAt(),
-                link.getExpiresAt());
+                link.getExpiresAt(),
+                link.hasPassword());
+    }
+
+    /**
+     * Xác thực mật khẩu truy cập của link (dùng BCrypt).
+     * Trả về true nếu link không có mật khẩu hoặc mật khẩu nhập vào khớp.
+     */
+    public boolean verifyPassword(Link link, String rawPassword) {
+        if (!link.hasPassword()) {
+            return true;
+        }
+        if (rawPassword == null || rawPassword.isBlank()) {
+            return false;
+        }
+        return passwordEncoder.matches(rawPassword.trim(), link.getPassword());
     }
 
     /**

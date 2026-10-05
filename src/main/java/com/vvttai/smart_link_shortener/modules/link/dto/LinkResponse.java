@@ -10,7 +10,8 @@ public record LinkResponse (
         Long clickCount,
         boolean active,
         LocalDateTime createdAt,
-        LocalDateTime expiresAt
+        LocalDateTime expiresAt,
+        boolean hasPassword
 ){
 
 }

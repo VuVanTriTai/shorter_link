@@ -15,7 +15,8 @@ public record LinkCacheDto(
         Long clickCount,
         boolean active,
         LocalDateTime createdAt,
-        LocalDateTime expiresAt
+        LocalDateTime expiresAt,
+        String password
 ) {
     /**
      * Chuyen tu Link entity sang LinkCacheDto de luu vao Redis.
@@ -28,7 +29,8 @@ public record LinkCacheDto(
                 link.getClickCount(),
                 link.isActive(),
                 link.getCreatedAt(),
-                link.getExpiresAt()
+                link.getExpiresAt(),
+                link.getPassword()
         );
     }
 
@@ -44,6 +46,7 @@ public record LinkCacheDto(
         link.setActive(this.active);
         link.setCreatedAt(this.createdAt);
         link.setExpiresAt(this.expiresAt);
+        link.setPassword(this.password);
         return link;
     }
 }

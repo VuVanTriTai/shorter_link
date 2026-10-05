@@ -10,5 +10,7 @@ public record UpdateLinkRequest(
         @NotBlank(message = "Original URL cannot be emtry") @URL(message = "Invalid URL format") String originalUrl,
         @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm")
         LocalDateTime expiresAt,
-        Boolean active) {
+        Boolean active,
+        String password,
+        Boolean removePassword) {
 }

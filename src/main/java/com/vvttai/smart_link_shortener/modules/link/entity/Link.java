@@ -47,6 +47,9 @@ public class Link {
     @Column(name = "expires_at")
     private LocalDateTime expiresAt;
 
+    @Column(name = "password")
+    private String password;
+
     @PrePersist
     public void prePersist() {
         if (this.createdAt == null) {
@@ -163,5 +166,17 @@ public class Link {
 
     public void setExpiresAt(LocalDateTime expiresAt) {
         this.expiresAt = expiresAt;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
+
+    public boolean hasPassword() {
+        return password != null && !password.isBlank();
     }
 }

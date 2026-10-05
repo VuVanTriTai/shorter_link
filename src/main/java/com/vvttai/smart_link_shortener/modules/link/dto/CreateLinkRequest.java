@@ -7,5 +7,6 @@ import java.time.LocalDateTime;
 public record CreateLinkRequest(
         @NotBlank(message = "Original URL cannot be empty") @URL(message = "Invalid URL format") String originalUrl,
         String customCode,
-        LocalDateTime expiresAt) {
+        LocalDateTime expiresAt,
+        String password) {
 }

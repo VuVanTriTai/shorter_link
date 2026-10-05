@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import CreateLink from './pages/CreateLink';
 import EditLink from './pages/EditLink';
 import LinkStats from './pages/LinkStats';
+import ProtectLink from './pages/ProtectLink';
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
           <Route path="/links/new" element={<CreateLink />} />
           <Route path="/links/:shortCode/edit" element={<EditLink />} />
           <Route path="/links/:shortCode/stats" element={<LinkStats />} />
+          <Route path="/protect/:shortCode" element={<ProtectLink />} />
         </Routes>
       </BrowserRouter>
   );
