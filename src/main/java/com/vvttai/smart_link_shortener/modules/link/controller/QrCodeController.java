@@ -75,7 +75,7 @@ public class QrCodeController {
 
     /**
      * Trả về QR code dạng Base64 data URI — dùng trong React state/modal.
-     * Yêu cầu xác thực (Bearer token) — bảo vệ bởi SecurityConfig (/api/qr/*/base64 không permitAll).
+     * Yêu cầu xác thực (Bearer token) — bảo vệ bởi SecurityConfig (/api/qr/{shortCode}/base64 không permitAll).
      */
     @GetMapping("/{shortCode}/base64")
     public ResponseEntity<Map<String, String>> getQrBase64(
