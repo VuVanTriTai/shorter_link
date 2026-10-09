@@ -11,8 +11,10 @@ import com.vvttai.smart_link_shortener.modules.user.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.LockedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,7 +50,8 @@ public class AuthService {
     }
 
     public void register(RegisterRequest request) {
-        if (userRepository.existsUserByUsername(request.username())) {
+        // Chỉ kiểm tra username chưa bị xoá — cho phép tái đăng ký sau soft-delete
+        if (userRepository.existsUserByUsernameAndDeletedFalse(request.username())) {
             throw new IllegalArgumentException("Username already exists!");
         }
         User user = new User(
@@ -59,11 +62,19 @@ public class AuthService {
     }
 
     public AuthTokens login(LoginRequest request) {
+        // AuthenticationManager gọi CustomUserDetailService.loadUserByUsername bên trong
+        // — nếu deleted hoặc locked, sẽ ném UsernameNotFoundException / LockedException tự động
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.username(), request.password())
         );
         String username = authentication.getName();
-        String accessToken = tokenProvider.generateToken(username);
+
+        // Lấy role từ DB để nhúng vào JWT
+        User user = userRepository.findByUsernameAndDeletedFalse(username)
+                .orElseThrow(() -> new RuntimeException("User not found: " + username));
+        String role = user.getRoles();
+
+        String accessToken = tokenProvider.generateToken(username, role);
         String refreshToken = refreshTokenService.createRefreshToken(username);
         return new AuthTokens(accessToken, refreshToken);
     }
@@ -72,22 +83,23 @@ public class AuthService {
      * Đăng nhập/Đăng ký bằng Google OAuth 2.0.
      *
      * Luồng:
-     * 1. Xác minh Google ID Token qua Google tokeninfo API
+     * 1. Xác minh Google ID Token bằng google-api-client (offline, cache public key)
      * 2. Tìm user theo providerId (Google sub) → nếu có → đăng nhập
      * 3. Tìm user theo email → nếu có → liên kết tài khoản Google vào user hiện tại
      * 4. Nếu hoàn toàn mới → tạo tài khoản mới
      * 5. Tạo JWT access token + refresh token
+     *
+     * @throws com.vvttai.smart_link_shortener.common.exception.InvalidTokenException    token sai / hết hạn → 401
+     * @throws com.vvttai.smart_link_shortener.common.exception.ExternalServiceException Google down / network lỗi → 503
      */
     @Transactional
     public AuthTokens loginWithGoogle(String googleIdToken) {
-        // 1. Xác minh ID Token
+        // 1. Xác minh ID Token — throws InvalidTokenException hoặc ExternalServiceException
         GoogleUserInfo googleUser = googleTokenVerifierService.verifyIdToken(googleIdToken);
-        if (googleUser == null) {
-            throw new IllegalArgumentException("Google ID Token không hợp lệ hoặc đã hết hạn.");
-        }
 
-        // 2. Tìm user đã liên kết Google trước đó
-        Optional<User> existingByProvider = userRepository.findByAuthProviderAndProviderId("GOOGLE", googleUser.sub());
+        // 2. Tìm user đã liên kết Google trước đó (bỏ qua user đã soft-delete)
+        Optional<User> existingByProvider = userRepository
+                .findByAuthProviderAndProviderIdAndDeletedFalse("GOOGLE", googleUser.sub());
         User user;
 
         if (existingByProvider.isPresent()) {
@@ -95,12 +107,12 @@ public class AuthService {
             user = existingByProvider.get();
             log.info("Google login: existing user={}", user.getUsername());
         } else {
-            // 3. Tìm user theo email (có thể đã đăng ký thường trước đó)
-            Optional<User> existingByEmail = userRepository.findByEmail(googleUser.email());
+            // 3. Tìm user theo email (có thể đã đăng ký thường trước đó, bỏ qua deleted)
+            Optional<User> existingByEmail = userRepository.findByEmailAndDeletedFalse(googleUser.email());
 
             if (existingByEmail.isEmpty()) {
                 // Tìm thêm theo username = email (trường hợp user cũ chưa có field email)
-                existingByEmail = userRepository.findByUsername(googleUser.email());
+                existingByEmail = userRepository.findByUsernameAndDeletedFalse(googleUser.email());
             }
 
             if (existingByEmail.isPresent()) {
@@ -128,15 +140,20 @@ public class AuthService {
                 user.setProviderId(googleUser.sub());
                 user.setDisplayName(googleUser.name());
                 user.setAvatarUrl(googleUser.picture());
-                // OAuth user không cần password
-                user.setPassword(null);
+                user.setPassword(null); // OAuth user không cần password
                 userRepository.save(user);
                 log.info("Google login: created new user={}", user.getUsername());
             }
         }
 
-        // 5. Tạo JWT tokens
-        String accessToken = tokenProvider.generateToken(user.getUsername());
+        // Guard: tài khoản bị khoá — từ chối đăng nhập dù token hợp lệ
+        if (user.isLocked()) {
+            log.warn("Google login rejected: user={} is locked", user.getUsername());
+            throw new LockedException("Tài khoản đã bị khoá. Vui lòng liên hệ quản trị viên.");
+        }
+
+        // 5. Tạo JWT tokens (nhúc role vào claim)
+        String accessToken = tokenProvider.generateToken(user.getUsername(), user.getRoles());
         String refreshToken = refreshTokenService.createRefreshToken(user.getUsername());
         return new AuthTokens(accessToken, refreshToken);
     }
@@ -145,15 +162,28 @@ public class AuthService {
         if (oldRefreshToken == null || oldRefreshToken.isBlank()) {
             throw new IllegalArgumentException("Refresh token is missing");
         }
-        String username = refreshTokenService.validateAndGetUsername(oldRefreshToken);
+
+        // consumeRefreshToken = Redis GETDEL: lấy username và xoá token trong một lệnh atomic.
+        // Nếu 2 request đồng thời gửi cùng token, chỉ 1 request nhận được username, request kia nhận null.
+        String username = refreshTokenService.consumeRefreshToken(oldRefreshToken);
         if (username == null) {
             throw new IllegalArgumentException("Refresh token is invalid or expired");
         }
 
-        // Xoay vòng (Rotate) Refresh Token
-        refreshTokenService.deleteRefreshToken(oldRefreshToken);
+        // Lấy role mới nhất từ DB — chỉ dùng user chưa bị soft-delete
+        User user = userRepository.findByUsernameAndDeletedFalse(username)
+                .orElseThrow(() -> new UsernameNotFoundException(
+                        "Tài khoản không tồn tại hoặc đã bị xoá: " + username));
+
+        // Tài khoản bị khoá — token đã bị consume ở trên (GETDEL), không cấp token mới
+        if (user.isLocked()) {
+            log.warn("Refresh token rejected: user={} is locked", username);
+            throw new LockedException("Tài khoản đã bị khoá. Vui lòng liên hệ quản trị viên.");
+        }
+
+        // Cấp refresh token mới (Rotate)
         String newRefreshToken = refreshTokenService.createRefreshToken(username);
-        String newAccessToken = tokenProvider.generateToken(username);
+        String newAccessToken = tokenProvider.generateToken(username, user.getRoles());
 
         return new AuthTokens(newAccessToken, newRefreshToken);
     }
@@ -166,8 +196,9 @@ public class AuthService {
 
     public void changePassword(ChangePasswordRequest request, Principal connectedUser) {
         String username = connectedUser.getName();
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        // Chỉ dùng user chưa bị soft-delete
+        User user = userRepository.findByUsernameAndDeletedFalse(username)
+                .orElseThrow(() -> new UsernameNotFoundException("Tài khoản không tồn tại: " + username));
 
         // OAuth users that haven't set a password cannot use change-password
         if (user.getPassword() == null || user.getPassword().isBlank()) {

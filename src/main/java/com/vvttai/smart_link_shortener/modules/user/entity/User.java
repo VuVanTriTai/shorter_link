@@ -1,6 +1,7 @@
 package com.vvttai.smart_link_shortener.modules.user.entity;
 
 import jakarta.persistence.*;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "users")
@@ -38,6 +39,28 @@ public class User {
 
     @Column(name = "avatar_url", length = 1024)
     private String avatarUrl;
+
+    /**
+     * Tài khoản bị khoá bởi Admin (không thể đăng nhập).
+     */
+    @Column(name = "locked", nullable = false)
+    private boolean locked = false;
+
+    /**
+     * Soft-delete: đánh dấu tài khoản đã bị xoá nhưng vẫn giữ data link cũ.
+     */
+    @Column(name = "deleted", nullable = false)
+    private boolean deleted = false;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @PrePersist
+    public void prePersist() {
+        if (this.createdAt == null) {
+            this.createdAt = LocalDateTime.now();
+        }
+    }
 
     public User() {}
 
@@ -83,6 +106,18 @@ public class User {
         return avatarUrl;
     }
 
+    public boolean isLocked() {
+        return locked;
+    }
+
+    public boolean isDeleted() {
+        return deleted;
+    }
+
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
     public void setId(Long id) {
         this.id = id;
     }
@@ -117,5 +152,17 @@ public class User {
 
     public void setAvatarUrl(String avatarUrl) {
         this.avatarUrl = avatarUrl;
+    }
+
+    public void setLocked(boolean locked) {
+        this.locked = locked;
+    }
+
+    public void setDeleted(boolean deleted) {
+        this.deleted = deleted;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 }

@@ -29,6 +29,11 @@ export default function Login() {
             const token = res.data.accessToken || res.data.token;
             if (token) {
                 localStorage.setItem('token', token);
+                // Giải mã JWT payload để lấy role
+                try {
+                    const jwtPayload = JSON.parse(atob(token.split('.')[1]));
+                    localStorage.setItem('role', jwtPayload.role || 'ROLE_USER');
+                } catch { /* ignore */ }
             }
             // Giải mã payload từ Google ID token để lấy email làm username hiển thị
             try {
@@ -120,6 +125,11 @@ export default function Login() {
             const token = res.data.accessToken || res.data.token;
             if (token) {
                 localStorage.setItem('token', token);
+                // Giải mã JWT payload để lấy role
+                try {
+                    const jwtPayload = JSON.parse(atob(token.split('.')[1]));
+                    localStorage.setItem('role', jwtPayload.role || 'ROLE_USER');
+                } catch { /* ignore */ }
             }
             localStorage.setItem('username', username);
 
@@ -202,7 +212,7 @@ export default function Login() {
                                 disabled={loading}
                                 className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                {loading ? 'Đang đăng nhập...' : 'Đăng Nhập'}
+                                {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
                             </button>
                         </div>
                     </form>

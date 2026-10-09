@@ -1,0 +1,68 @@
+services:
+  # ===== Backend (Spring Boot) =====
+  - type: web
+    name: sls-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: sls-postgres
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: sls-postgres
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: sls-postgres
+          property: database
+      - key: DB_USERNAME
+        fromDatabase:
+          name: sls-postgres
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: sls-postgres
+          property: password
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_EXPIRATION
+        value: "900000"
+      - key: JWT_REFRESH_EXPIRATION
+        value: "604800"
+      # Redis — dùng Upstash Redis (tạo riêng tại upstash.com)
+      - key: REDIS_HOST
+        sync: false   # Điền thủ công sau khi tạo Upstash
+      - key: REDIS_PORT
+        value: "6379"
+      - key: REDIS_PASSWORD
+        sync: false   # Điền thủ công sau khi tạo Upstash
+      - key: APP_DOMAINS
+        sync: false   # Điền URL frontend sau khi deploy xong
+      - key: GOOGLE_SAFEBROWSING_KEY
+        value: ""
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        value: ""
+
+  # ===== Frontend (React Static Site) =====
+  - type: web
+    name: sls-frontend
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    plan: free
+    buildArgs:
+      - key: VITE_API_URL
+        sync: false   # Điền URL backend sau khi deploy xong
+      - key: VITE_GOOGLE_CLIENT_ID
+        value: ""
+
+databases:
+  # ===== PostgreSQL (Render Managed — miễn phí 90 ngày) =====
+  - name: sls-postgres
+    databaseName: smart_link_shortener
+    plan: free

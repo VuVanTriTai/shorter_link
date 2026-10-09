@@ -91,7 +91,7 @@ export default function LinkStats() {
     };
 
     const shortUrl = stats
-        ? `${import.meta.env.VITE_API_URL || 'http://localhost:8080'}/r/${stats.shortCode}`
+        ? `${window.location.origin}/r/${stats.shortCode}`
         : '';
 
     const handleCopy = async () => {

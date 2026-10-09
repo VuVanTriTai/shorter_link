@@ -15,6 +15,24 @@ public interface LinkRepository extends JpaRepository<Link, Long> {
     Optional<Link> findByShortCodeAndUserId(String shortCode, Long userId);
     Optional<Link> findByShortCodeAndUserUsername(String shortCode, String username);
 
+    // ========== Admin queries ==========
+
+    /** Tất cả link (phân trang) */
+    org.springframework.data.domain.Page<Link> findAll(org.springframework.data.domain.Pageable pageable);
+
+    /** Link theo userId (phân trang) — admin xem link của 1 user cụ thể */
+    org.springframework.data.domain.Page<Link> findByUserId(Long userId, org.springframework.data.domain.Pageable pageable);
+
+    /** Link theo username (phân trang) */
+    org.springframework.data.domain.Page<Link> findByUserUsername(String username, org.springframework.data.domain.Pageable pageable);
+
+    /** Top trending links (click cao nhất, đang hoạt động và không bị cấm) */
+    List<Link> findTop10ByActiveTrueAndBannedFalseOrderByClickCountDesc();
+
+    /** Tìm kiếm link theo shortCode hoặc originalUrl */
+    @org.springframework.data.jpa.repository.Query("SELECT l FROM Link l WHERE LOWER(l.shortCode) LIKE LOWER(CONCAT('%', :keyword, '%')) OR LOWER(l.originalUrl) LIKE LOWER(CONCAT('%', :keyword, '%'))")
+    org.springframework.data.domain.Page<Link> searchByKeyword(@org.springframework.data.repository.query.Param("keyword") String keyword, org.springframework.data.domain.Pageable pageable);
+
     @org.springframework.data.jpa.repository.Modifying(flushAutomatically = true, clearAutomatically = true)
     @org.springframework.transaction.annotation.Transactional
     @org.springframework.data.jpa.repository.Query("UPDATE Link l SET l.clickCount = :total WHERE l.id = :id")

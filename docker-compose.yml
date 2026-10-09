@@ -74,6 +74,9 @@ services:
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       # App
       APP_DOMAINS: ${APP_DOMAINS:-localhost,127.0.0.1}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+      BLOCKED_DOMAIN_SUFFIXES: ${BLOCKED_DOMAIN_SUFFIXES:-trycloudflare.com}
+      UNLOCK_TOKEN_SECRET: ${UNLOCK_TOKEN_SECRET:-}
     ports:
       - "8080:8080"
 

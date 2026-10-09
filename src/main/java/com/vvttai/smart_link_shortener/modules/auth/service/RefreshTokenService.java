@@ -37,7 +37,11 @@ public class RefreshTokenService {
     }
 
     /**
-     * Kiểm tra Refresh Token trong Redis. Trả về username nếu hợp lệ, ngược lại trả về null.
+     * Kiểm tra Refresh Token trong Redis (READ-ONLY, không xoá).
+     * Dùng cho trường hợp chỉ cần đọc username mà không consume token.
+     * <p>
+     * <b>Lưu ý:</b> Không dùng cặp này + {@link #deleteRefreshToken} để rotate token
+     * vì không atomic. Dùng {@link #consumeRefreshToken} thay thế.
      */
     public String validateAndGetUsername(String token) {
         if (token == null || token.isBlank()) {
@@ -48,13 +52,30 @@ public class RefreshTokenService {
     }
 
     /**
+     * Lấy username và xoá Refresh Token trong <b>một thao tác atomic (Redis GETDEL)</b>.
+     * <p>
+     * Dùng cho token rotation: đảm bảo chỉ có đúng một request thắng khi
+     * nhiều request đồng thời cố dùng cùng một refresh token.
+     *
+     * @param token refresh token cần consume
+     * @return username nếu token hợp lệ; {@code null} nếu token đã bị consume hoặc không tồn tại
+     */
+    public String consumeRefreshToken(String token) {
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+        // getAndDelete = Redis GETDEL — atomic: lấy giá trị và xoá key trong một lệnh
+        return stringRedisTemplate.opsForValue().getAndDelete(REFRESH_TOKEN_PREFIX + token);
+    }
+
+    /**
      * Xóa Refresh Token trong Redis khi logout hoặc xoay vòng (rotate) token.
      */
     public void deleteRefreshToken(String token) {
         if (token != null && !token.isBlank()) {
             String key = REFRESH_TOKEN_PREFIX + token;
             stringRedisTemplate.delete(key);
-            log.debug("Deleted RefreshToken: {}", token);
+            log.debug("Deleted RefreshToken from Redis");
         }
     }
 

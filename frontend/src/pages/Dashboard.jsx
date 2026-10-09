@@ -124,6 +124,7 @@ export default function Dashboard() {
         } finally {
             localStorage.removeItem('token');
             localStorage.removeItem('username');
+            localStorage.removeItem('role');
             navigate('/login');
         }
     };
@@ -310,6 +311,21 @@ export default function Dashboard() {
                                         <p className="dropdown-username">{username}</p>
                                     </div>
                                     <div className="dropdown-body">
+                                        {localStorage.getItem('role') === 'ROLE_ADMIN' && (
+                                            <button
+                                                onClick={() => {
+                                                    setSettingsOpen(false);
+                                                    navigate('/admin');
+                                                }}
+                                                className="dropdown-item"
+                                                style={{ color: '#f59e0b' }}
+                                            >
+                                                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                                </svg>
+                                                <span>🛡️ Admin Panel</span>
+                                            </button>
+                                        )}
                                         <button
                                             onClick={() => {
                                                 setSettingsOpen(false);
@@ -520,7 +536,7 @@ export default function Dashboard() {
                                         style={{ animationDelay: `${index * 60}ms` }}
                                     >
                                         {/* Card top strip */}
-                                        <div className={`card-strip ${isActive ? (expired ? 'expired' : 'active') : 'paused'}`}></div>
+                                        <div className={`card-strip ${link.banned ? 'banned' : (isActive ? (expired ? 'expired' : 'active') : 'paused')}`}></div>
 
                                         <div className="card-body">
                                             {/* Link Info */}
@@ -530,37 +546,46 @@ export default function Dashboard() {
                                                         href={shortUrl}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        className={`link-short-url ${!isActive ? 'disabled' : ''}`}
-                                                        title={isActive ? 'Mở liên kết rút gọn' : 'Liên kết đang tắt'}
+                                                        className={`link-short-url ${(!isActive || link.banned) ? 'disabled' : ''}`}
+                                                        title={link.banned ? 'Liên kết đã bị Quản trị viên khoá do vi phạm' : (isActive ? 'Mở liên kết rút gọn' : 'Liên kết đang tắt')}
                                                     >
                                                         {shortUrl}
                                                     </a>
                                                     {/* Status badge */}
-                                                    {link.hasPassword && (
-                                                        <span className="badge badge-password" title="Liên kết có mật khẩu bảo vệ" style={{ background: '#fef3c7', color: '#92400e', borderColor: '#fde68a' }}>
-                                                            <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" style={{ display: 'inline', marginRight: '3px', verticalAlign: '-1px' }}>
-                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                                                            </svg>
-                                                            Mật khẩu
+                                                    {link.banned ? (
+                                                        <span className="badge badge-banned" style={{ background: '#fee2e2', color: '#991b1b', borderColor: '#fca5a5' }} title="Liên kết đã bị Quản trị viên khoá do vi phạm chính sách">
+                                                            <span className="badge-dot" style={{ background: '#dc2626' }}></span>
+                                                            🚫 Bị Admin khoá
                                                         </span>
-                                                    )}
-                                                    {isActive ? (
-                                                        expired ? (
-                                                            <span className="badge badge-expired">
-                                                                <span className="badge-dot"></span>
-                                                                Hết hạn
-                                                            </span>
-                                                        ) : (
-                                                            <span className="badge badge-active">
-                                                                <span className="badge-dot"></span>
-                                                                Hoạt động
-                                                            </span>
-                                                        )
                                                     ) : (
-                                                        <span className="badge badge-paused">
-                                                            <span className="badge-dot"></span>
-                                                            Tạm dừng
-                                                        </span>
+                                                        <>
+                                                            {link.hasPassword && (
+                                                                <span className="badge badge-password" title="Liên kết có mật khẩu bảo vệ" style={{ background: '#fef3c7', color: '#92400e', borderColor: '#fde68a' }}>
+                                                                    <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" style={{ display: 'inline', marginRight: '3px', verticalAlign: '-1px' }}>
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                                                    </svg>
+                                                                    Mật khẩu
+                                                                </span>
+                                                            )}
+                                                            {isActive ? (
+                                                                expired ? (
+                                                                    <span className="badge badge-expired">
+                                                                        <span className="badge-dot"></span>
+                                                                        Hết hạn
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="badge badge-active">
+                                                                        <span className="badge-dot"></span>
+                                                                        Hoạt động
+                                                                    </span>
+                                                                )
+                                                            ) : (
+                                                                <span className="badge badge-paused">
+                                                                    <span className="badge-dot"></span>
+                                                                    Tạm dừng
+                                                                </span>
+                                                            )}
+                                                        </>
                                                     )}
                                                 </div>
 
@@ -598,23 +623,32 @@ export default function Dashboard() {
                                             {/* Action Buttons */}
                                             <div className="link-actions">
                                                 <button
-                                                    onClick={() => handleToggleActive(link)}
-                                                    disabled={togglingId === link.id}
-                                                    title={isActive ? 'Tạm ngưng liên kết' : 'Kích hoạt lại'}
-                                                    className={`action-btn ${isActive ? 'toggle-on' : 'toggle-off'}`}
+                                                    onClick={() => {
+                                                        if (link.banned) {
+                                                            alert('Link này đã bị Quản trị viên khoá do vi phạm quy định, bạn không thể tự bật lại!');
+                                                            return;
+                                                        }
+                                                        handleToggleActive(link);
+                                                    }}
+                                                    disabled={togglingId === link.id || link.banned}
+                                                    title={link.banned ? 'Liên kết đã bị Quản trị viên khoá' : (isActive ? 'Tạm ngưng liên kết' : 'Kích hoạt lại')}
+                                                    className={`action-btn ${link.banned ? 'toggle-banned' : (isActive ? 'toggle-on' : 'toggle-off')}`}
+                                                    style={link.banned ? { opacity: 0.6, cursor: 'not-allowed', background: '#fee2e2', color: '#991b1b', borderColor: '#fca5a5' } : {}}
                                                 >
                                                     {togglingId === link.id ? (
                                                         <div className="btn-spinner"></div>
                                                     ) : (
                                                         <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                                                            {isActive ? (
+                                                            {link.banned ? (
+                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                                            ) : isActive ? (
                                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                             ) : (
                                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                             )}
                                                         </svg>
                                                     )}
-                                                    <span>{isActive ? 'Bật' : 'Tắt'}</span>
+                                                    <span>{link.banned ? 'Bị khoá' : (isActive ? 'Bật' : 'Tắt')}</span>
                                                 </button>
 
                                                 <Link

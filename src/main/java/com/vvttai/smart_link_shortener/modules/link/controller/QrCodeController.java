@@ -4,6 +4,7 @@ import com.vvttai.smart_link_shortener.modules.link.service.QrCodeService;
 import com.google.zxing.WriterException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -21,7 +22,7 @@ import java.util.Map;
  *   GET  /api/qr/{shortCode}/base64   → trả về JSON { "dataUri": "data:image/png;base64,..." }
  *
  * Endpoint PNG không yêu cầu xác thực (public) — để browser/img tag gọi trực tiếp.
- * Endpoint Base64 yêu cầu đăng nhập (chỉ owner mới cần).
+ * Endpoint Base64 yêu cầu đăng nhập (chỉ owner mới cần) — bảo vệ bởi SecurityConfig.
  */
 @RestController
 @RequestMapping("/api/qr")
@@ -30,6 +31,13 @@ public class QrCodeController {
     private static final Logger log = LoggerFactory.getLogger(QrCodeController.class);
 
     private final QrCodeService qrCodeService;
+
+    /**
+     * Base URL của ứng dụng (ví dụ: https://short.example.com).
+     * Không hardcode localhost để QR code hoạt động đúng trên mọi môi trường.
+     */
+    @Value("${app.base-url:http://localhost:8080}")
+    private String baseUrl;
 
     public QrCodeController(QrCodeService qrCodeService) {
         this.qrCodeService = qrCodeService;
@@ -50,7 +58,7 @@ public class QrCodeController {
         size = Math.max(50, Math.min(size, 1000));
 
         try {
-            String shortUrl = "http://localhost:8080/r/" + shortCode;
+            String shortUrl = baseUrl + "/r/" + shortCode;
             byte[] png = qrCodeService.generatePng(shortUrl, size, size);
 
             HttpHeaders headers = new HttpHeaders();
@@ -67,7 +75,7 @@ public class QrCodeController {
 
     /**
      * Trả về QR code dạng Base64 data URI — dùng trong React state/modal.
-     * Yêu cầu xác thực (Bearer token).
+     * Yêu cầu xác thực (Bearer token) — bảo vệ bởi SecurityConfig (/api/qr/*/base64 không permitAll).
      */
     @GetMapping("/{shortCode}/base64")
     public ResponseEntity<Map<String, String>> getQrBase64(
@@ -75,7 +83,7 @@ public class QrCodeController {
             Principal principal) {
 
         try {
-            String shortUrl = "http://localhost:8080/r/" + shortCode;
+            String shortUrl = baseUrl + "/r/" + shortCode;
             String dataUri  = qrCodeService.generateBase64DataUri(shortUrl);
 
             return ResponseEntity.ok(Map.of(
@@ -90,3 +98,4 @@ public class QrCodeController {
         }
     }
 }
+

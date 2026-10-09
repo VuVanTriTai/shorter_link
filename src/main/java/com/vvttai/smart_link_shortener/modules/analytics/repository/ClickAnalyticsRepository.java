@@ -14,6 +14,11 @@ public interface ClickAnalyticsRepository extends JpaRepository<ClickAnalytics, 
 
     long countByLinkId(Long linkId);
 
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.transaction.annotation.Transactional
+    @Query("DELETE FROM ClickAnalytics c WHERE c.link.id = :linkId")
+    void deleteByLinkId(@Param("linkId") Long linkId);
+
     @Query("SELECT c FROM ClickAnalytics c WHERE c.link.id = :linkId ORDER BY c.clickedAt DESC")
     List<ClickAnalytics> findByLinkId(@Param("linkId") Long linkId);
 
@@ -43,4 +48,40 @@ public interface ClickAnalyticsRepository extends JpaRepository<ClickAnalytics, 
         String getClickDate();
         Long getClickCount();
     }
+
+    // Projection interface cho thống kê GROUP BY (device, country, referrer)
+    interface StatsProjection {
+        String getLabel();
+        Long getTotal();
+    }
+
+    // Thống kê thiết bị trên TOÀN BỘ click (không phải chỉ 30 click gần nhất)
+    @Query(value = """
+            SELECT COALESCE(NULLIF(TRIM(c.device_type), ''), 'Unknown') AS label, COUNT(*) AS total
+            FROM click_analytics c
+            WHERE c.link_id = :linkId
+            GROUP BY label
+            ORDER BY total DESC
+            """, nativeQuery = true)
+    List<StatsProjection> countByDeviceType(@Param("linkId") Long linkId);
+
+    // Thống kê quốc gia trên TOÀN BỘ click
+    @Query(value = """
+            SELECT COALESCE(NULLIF(TRIM(c.country), ''), 'Unknown') AS label, COUNT(*) AS total
+            FROM click_analytics c
+            WHERE c.link_id = :linkId
+            GROUP BY label
+            ORDER BY total DESC
+            """, nativeQuery = true)
+    List<StatsProjection> countByCountry(@Param("linkId") Long linkId);
+
+    // Thống kê nguồn truy cập (referrer) trên TOÀN BỘ click
+    @Query(value = """
+            SELECT COALESCE(NULLIF(TRIM(c.referrer), ''), 'Direct') AS label, COUNT(*) AS total
+            FROM click_analytics c
+            WHERE c.link_id = :linkId
+            GROUP BY label
+            ORDER BY total DESC
+            """, nativeQuery = true)
+    List<StatsProjection> countByReferrer(@Param("linkId") Long linkId);
 }

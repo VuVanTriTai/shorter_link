@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.Principal;
+
 @RestController
 @RequestMapping
 public class AnalyticsController {
@@ -23,29 +25,44 @@ public class AnalyticsController {
         this.linkService = linkService;
     }
 
-    @GetMapping({"/api/links/{shortCode}/stats", "/r/{shortCode}/stats"})
-    public ResponseEntity<LinkStatsResponse> getLinkStats(@PathVariable String shortCode) {
+    /**
+     * Xem thống kê chi tiết của link.
+     * Yêu cầu đăng nhập + chỉ chủ sở hữu link mới được xem.
+     * Đã xóa alias /r/{shortCode}/stats để tránh lộ dữ liệu qua route công khai.
+     */
+    @GetMapping("/api/links/{shortCode}/stats")
+    public ResponseEntity<LinkStatsResponse> getLinkStats(
+            @PathVariable String shortCode,
+            Principal principal) {
         try {
             analyticsService.flushClickBuffer();
         } catch (Exception e) {
             log.warn("Failed to flush click buffer before fetching stats: {}", e.getMessage());
         }
-        Link link = linkService.getLinkForStats(shortCode);
+        // Kiểm tra chủ sở hữu: chỉ owner mới được xem stats
+        Link link = linkService.getLinkForStatsOwnedBy(shortCode, principal.getName());
         LinkStatsResponse response = analyticsService.getLinkStats(link);
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping({"/api/links/{shortCode}/clicks", "/r/{shortCode}/clicks"})
+    /**
+     * Xem danh sách lượt click phân trang.
+     * Yêu cầu đăng nhập + chỉ chủ sở hữu link mới được xem.
+     * Đã xóa alias /r/{shortCode}/clicks để tránh lộ dữ liệu qua route công khai.
+     */
+    @GetMapping("/api/links/{shortCode}/clicks")
     public ResponseEntity<?> getLinkClicks(
             @PathVariable String shortCode,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            Principal principal) {
         try {
             analyticsService.flushClickBuffer();
         } catch (Exception e) {
             log.warn("Failed to flush click buffer before fetching clicks: {}", e.getMessage());
         }
-        Link link = linkService.getLinkForStats(shortCode);
+        // Kiểm tra chủ sở hữu: chỉ owner mới được xem clicks
+        Link link = linkService.getLinkForStatsOwnedBy(shortCode, principal.getName());
         size = Math.min(Math.max(size, 5), 100);
         org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size);
         return ResponseEntity.ok(analyticsService.getPaginatedClicks(link, pageable));

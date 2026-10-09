@@ -51,16 +51,33 @@ public class JwtTokenProvider {
         return jwtExpiration > 0 ? jwtExpiration : 900000L;
     }
 
-    public String generateToken(String username) {
+    /**
+     * Tạo JWT token với role claim.
+     */
+    public String generateToken(String username, String role) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + getExpirationTime());
 
+        // Chuẩn hoá role: đảm bảo luôn có prefix ROLE_
+        String normalizedRole = (role != null && !role.isBlank()) ? role : "ROLE_USER";
+        if (!normalizedRole.startsWith("ROLE_")) {
+            normalizedRole = "ROLE_" + normalizedRole.toUpperCase();
+        }
+
         return Jwts.builder()
                 .subject(username)
+                .claim("role", normalizedRole)
                 .issuedAt(now)
                 .expiration(expiryDate)
                 .signWith(signingKey)
                 .compact();
+    }
+
+    /**
+     * Backward-compatible: mặc định role = ROLE_USER.
+     */
+    public String generateToken(String username) {
+        return generateToken(username, "ROLE_USER");
     }
 
     public String getUsernameFromToken(String token) {
@@ -70,6 +87,19 @@ public class JwtTokenProvider {
                 .parseSignedClaims(token)
                 .getPayload()
                 .getSubject();
+    }
+
+    /**
+     * Đọc role claim từ JWT token.
+     */
+    public String getRoleFromToken(String token) {
+        String role = Jwts.parser()
+                .verifyWith(signingKey)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .get("role", String.class);
+        return (role != null && !role.isBlank()) ? role : "ROLE_USER";
     }
 
     public boolean validateToken(String token) {
@@ -91,3 +121,4 @@ public class JwtTokenProvider {
         return false;
     }
 }
+

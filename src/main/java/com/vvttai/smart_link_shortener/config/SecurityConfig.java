@@ -33,9 +33,14 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/**", "/auth/**", "/r/**", "/error", "/api/health/**").permitAll()
-                        // QR endpoints — public (PNG embed) + base64 (axios with token)
-                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/qr/**").permitAll()
+                        .requestMatchers("/api/auth/**", "/auth/**", "/error", "/api/health/**").permitAll()
+                        // Chỉ cho phép public đúng 3 route redirect (chặn /r/{code}/stats, /r/{code}/clicks)
+                        .requestMatchers("/r/*", "/r/*/info", "/r/*/unlock").permitAll()
+                        // QR PNG endpoint — public (cho <img src> embed trực tiếp)
+                        // Chỉ cho phép /api/qr/{code} (PNG), KHÔNG cho /api/qr/{code}/base64
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/qr/*").permitAll()
+                        // Admin endpoints — chỉ ROLE_ADMIN mới truy cập được
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/links/**", "/api/links").authenticated()
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
@@ -43,6 +48,11 @@ public class SecurityConfig {
                             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                             response.setContentType("application/json;charset=UTF-8");
                             response.getWriter().write("{\"message\": \"Unauthorized or token expired\"}");
+                        })
+                        .accessDeniedHandler((request, response, accessDeniedException) -> {
+                            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write("{\"message\": \"Bạn không có quyền truy cập tài nguyên này (yêu cầu quyền ADMIN)\"}");
                         }));
 
         http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);

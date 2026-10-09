@@ -167,33 +167,36 @@ public class AnalyticsService {
         List<LinkStatsResponse.RecentClickDto> recentClicks = recentList.stream()
                 .map(c -> new LinkStatsResponse.RecentClickDto(
                         c.getClickedAt(),
-                        c.getIpAddress(),
-                        c.getDeviceType() != null && !c.getDeviceType().isBlank() ? c.getDeviceType() : "Desktop",
-                        c.getCountry() != null && !c.getCountry().isBlank() ? c.getCountry() : "VN",
+                        maskIpAddress(c.getIpAddress()),
+                        c.getDeviceType() != null && !c.getDeviceType().isBlank() ? c.getDeviceType() : "Unknown",
+                        c.getCountry() != null && !c.getCountry().isBlank() ? c.getCountry() : "Unknown",
                         c.getReferrer() != null && !c.getReferrer().isBlank() ? c.getReferrer() : "Direct",
                         c.getUserAgent()
                 ))
                 .toList();
 
-        // 3. Thống kê tỷ lệ thiết bị (Mobile vs Desktop)
-        Map<String, Long> deviceStats = recentList.stream()
-                .collect(Collectors.groupingBy(
-                        c -> c.getDeviceType() != null && !c.getDeviceType().isBlank() ? c.getDeviceType() : "Desktop",
-                        Collectors.counting()
+        // 3. Thống kê tỷ lệ thiết bị — GROUP BY trên TOÀN BỘ click (không chỉ 30 click gần nhất)
+        Map<String, Long> deviceStats = clickAnalyticsRepository.countByDeviceType(link.getId())
+                .stream()
+                .collect(Collectors.toMap(
+                        ClickAnalyticsRepository.StatsProjection::getLabel,
+                        ClickAnalyticsRepository.StatsProjection::getTotal
                 ));
 
-        // 4. Thống kê theo quốc gia
-        Map<String, Long> countryStats = recentList.stream()
-                .collect(Collectors.groupingBy(
-                        c -> c.getCountry() != null && !c.getCountry().isBlank() ? c.getCountry() : "VN",
-                        Collectors.counting()
+        // 4. Thống kê theo quốc gia — GROUP BY trên TOÀN BỘ click
+        Map<String, Long> countryStats = clickAnalyticsRepository.countByCountry(link.getId())
+                .stream()
+                .collect(Collectors.toMap(
+                        ClickAnalyticsRepository.StatsProjection::getLabel,
+                        ClickAnalyticsRepository.StatsProjection::getTotal
                 ));
 
-        // 5. Thống kê theo nguồn truy cập (Referrer)
-        Map<String, Long> referrerStats = recentList.stream()
-                .collect(Collectors.groupingBy(
-                        c -> c.getReferrer() != null && !c.getReferrer().isBlank() ? c.getReferrer() : "Direct",
-                        Collectors.counting()
+        // 5. Thống kê theo nguồn truy cập (Referrer) — GROUP BY trên TOÀN BỘ click
+        Map<String, Long> referrerStats = clickAnalyticsRepository.countByReferrer(link.getId())
+                .stream()
+                .collect(Collectors.toMap(
+                        ClickAnalyticsRepository.StatsProjection::getLabel,
+                        ClickAnalyticsRepository.StatsProjection::getTotal
                 ));
 
         return new LinkStatsResponse(
@@ -217,11 +220,31 @@ public class AnalyticsService {
         return clickAnalyticsRepository.findByLinkIdOrderByClickedAtDesc(link.getId(), pageable)
                 .map(c -> new LinkStatsResponse.RecentClickDto(
                         c.getClickedAt(),
-                        c.getIpAddress(),
-                        c.getDeviceType() != null && !c.getDeviceType().isBlank() ? c.getDeviceType() : "Desktop",
-                        c.getCountry() != null && !c.getCountry().isBlank() ? c.getCountry() : "VN",
+                        maskIpAddress(c.getIpAddress()),
+                        c.getDeviceType() != null && !c.getDeviceType().isBlank() ? c.getDeviceType() : "Unknown",
+                        c.getCountry() != null && !c.getCountry().isBlank() ? c.getCountry() : "Unknown",
                         c.getReferrer() != null && !c.getReferrer().isBlank() ? c.getReferrer() : "Direct",
                         c.getUserAgent()
                 ));
+    }
+
+    /**
+     * Che octet/segment cuối của IP để bảo vệ quyền riêng tư khách truy cập.
+     * IPv4: 192.168.1.5 → 192.168.1.***
+     * IPv6: 2001:db8::1 → 2001:db8::****
+     */
+    private String maskIpAddress(String ip) {
+        if (ip == null || ip.isBlank()) return ip;
+        // IPv4
+        int lastDot = ip.lastIndexOf('.');
+        if (lastDot > 0) {
+            return ip.substring(0, lastDot) + ".***";
+        }
+        // IPv6
+        int lastColon = ip.lastIndexOf(':');
+        if (lastColon > 0) {
+            return ip.substring(0, lastColon) + ":****";
+        }
+        return "***";
     }
 }

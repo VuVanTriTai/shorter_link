@@ -33,7 +33,7 @@ public class UserService {
     }
 
     public void register(RegisterRequest request) {
-        if (userRepository.existsUserByUsername(request.username())) {
+        if (userRepository.existsUserByUsernameAndDeletedFalse(request.username())) {
             throw new IllegalArgumentException("username areadly exist!");
         }
 
@@ -59,7 +59,7 @@ public class UserService {
 
     public void changePassword(ChangePasswordRequest request, Principal connectedUser) {
         String username = connectedUser.getName();
-        User user = userRepository.findByUsername(username)
+        User user = userRepository.findByUsernameAndDeletedFalse(username)
                 .orElseThrow(() -> new RuntimeException("user not found"));
 
         if (!passwordEncoder.matches(request.currentPassword(), user.getPassword())) {

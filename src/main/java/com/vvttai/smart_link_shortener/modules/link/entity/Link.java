@@ -36,6 +36,12 @@ public class Link {
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
+    @Column(name = "banned", nullable = false)
+    private boolean banned = false;
+
+    @OneToMany(mappedBy = "link", cascade = CascadeType.ALL, orphanRemoval = true)
+    private java.util.List<com.vvttai.smart_link_shortener.modules.analytics.entity.ClickAnalytics> clickAnalytics = new java.util.ArrayList<>();
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -142,6 +148,14 @@ public class Link {
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public boolean isBanned() {
+        return banned;
+    }
+
+    public void setBanned(boolean banned) {
+        this.banned = banned;
     }
 
     public LocalDateTime getCreatedAt() {

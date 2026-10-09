@@ -1,7 +1,11 @@
 package com.vvttai.smart_link_shortener.common.exception;
 
+import com.vvttai.smart_link_shortener.common.exception.ExternalServiceException;
+import com.vvttai.smart_link_shortener.common.exception.InvalidTokenException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.LockedException;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -29,6 +33,32 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, String>> handleLinkInactive(LinkInactiveException e) {
         // 403 Forbidden: link đang tạm dừng hoạt động bởi người dùng
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Map.of("message", e.getMessage()));
+    }
+
+    @ExceptionHandler(LockedException.class)
+    public ResponseEntity<Map<String, String>> handleLocked(LockedException e) {
+        // 423 Locked hoặc 403 Forbidden — dùng 403 vì 423 ít client nào handle
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Map.of("message", e.getMessage()));
+    }
+
+    @ExceptionHandler(UsernameNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleUsernameNotFound(UsernameNotFoundException e) {
+        // Ẩn thông tin cụ thể: không tiết lộ user có tồn tại hay không
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("message", "Thông tin xác thực không hợp lệ."));
+    }
+
+    @ExceptionHandler(InvalidTokenException.class)
+    public ResponseEntity<Map<String, String>> handleInvalidToken(InvalidTokenException e) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("message", e.getMessage()));
+    }
+
+    @ExceptionHandler(ExternalServiceException.class)
+    public ResponseEntity<Map<String, String>> handleExternalService(ExternalServiceException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(Map.of("message", e.getMessage()));
     }
 

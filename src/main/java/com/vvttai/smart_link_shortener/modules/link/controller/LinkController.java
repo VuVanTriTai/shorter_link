@@ -5,7 +5,6 @@ import com.vvttai.smart_link_shortener.modules.link.dto.LinkResponse;
 import com.vvttai.smart_link_shortener.modules.link.dto.UpdateLinkRequest;
 import com.vvttai.smart_link_shortener.modules.link.service.LinkService;
 import jakarta.validation.Valid;
-import org.apache.kafka.common.protocol.types.Field;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;

@@ -2,6 +2,7 @@ package com.vvttai.smart_link_shortener.modules.redirect.controller;
 
 import com.vvttai.smart_link_shortener.common.ratelimit.RateLimitAction;
 import com.vvttai.smart_link_shortener.common.ratelimit.RateLimiterService;
+import com.vvttai.smart_link_shortener.common.util.UnlockTokenService;
 import com.vvttai.smart_link_shortener.modules.analytics.service.AnalyticsService;
 import com.vvttai.smart_link_shortener.modules.link.entity.Link;
 import com.vvttai.smart_link_shortener.modules.link.service.LinkService;
@@ -22,23 +23,40 @@ public class RedirectController {
     private final LinkService linkService;
     private final AnalyticsService analyticsService;
     private final RateLimiterService rateLimiterService;
+    private final UnlockTokenService unlockTokenService;
 
     public RedirectController(LinkService linkService,
             AnalyticsService analyticsService,
-            RateLimiterService rateLimiterService) {
+            RateLimiterService rateLimiterService,
+            UnlockTokenService unlockTokenService) {
         this.linkService = linkService;
         this.analyticsService = analyticsService;
         this.rateLimiterService = rateLimiterService;
+        this.unlockTokenService = unlockTokenService;
     }
 
+    /**
+     * Redirect endpoint.
+     *
+     * Luồng xác thực mật khẩu (thay vì ?pass= trên URL):
+     * 1. GET /r/{code} → phát hiện link có mật khẩu → redirect sang /protect/{code}
+     * 2. React form POST /r/{code}/unlock với JSON body → server verify → trả về unlock token
+     * 3. Frontend redirect tới /r/{code}?t=<HMAC_TOKEN>
+     * 4. GET /r/{code}?t=... → server validate token → redirect tới URL đích
+     *
+     * Lợi ích: mật khẩu KHÔNG bao giờ xuất hiện trên URL (tránh log, history, Referer leak).
+     *
+     * IP extraction: dùng request.getRemoteAddr() thay vì tự parse X-Forwarded-For.
+     * Tomcat (server.forward-headers-strategy=native) đã xử lý trusted proxy headers.
+     */
     @GetMapping("/r/{shortCode}")
     public ResponseEntity<?> redirect(
             @PathVariable String shortCode,
-            @org.springframework.web.bind.annotation.RequestParam(required = false) String pass,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String t,
             HttpServletRequest request) {
         // --- Trích xuất & chuẩn hoá IP ---
-        String rawIp = extractClientIp(request);
-        String ipAddress = RateLimiterService.normalizeIp(rawIp);
+        // Tomcat đã xử lý X-Forwarded-For từ trusted proxy → getRemoteAddr() trả về client IP thật
+        String ipAddress = RateLimiterService.normalizeIp(request.getRemoteAddr());
 
         // --- Kiểm tra Rate Limit (Tiered) ---
         RateLimitAction action = rateLimiterService.checkAndIncrement(ipAddress, shortCode);
@@ -58,9 +76,10 @@ public class RedirectController {
 
         // --- Kiểm tra mật khẩu bảo vệ ---
         if (link.hasPassword()) {
-            boolean passwordMatched = pass != null && linkService.verifyPassword(link, pass);
-            if (!passwordMatched) {
-                // Chưa nhập mật khẩu hoặc sai -> Chuyển hướng sang trang nhập mật khẩu của React
+            // Kiểm tra unlock token (thay vì ?pass= trên URL)
+            boolean tokenValid = t != null && !t.isBlank() && unlockTokenService.validateToken(t, shortCode);
+            if (!tokenValid) {
+                // Chưa có token hợp lệ → chuyển hướng sang trang nhập mật khẩu
                 HttpHeaders headers = new HttpHeaders();
                 headers.setLocation(URI.create("/protect/" + shortCode));
                 headers.setCacheControl(org.springframework.http.CacheControl.noCache().noStore().mustRevalidate());
@@ -68,6 +87,7 @@ public class RedirectController {
                 headers.setExpires(0);
                 return new ResponseEntity<>(headers, HttpStatus.FOUND);
             }
+            // Token hợp lệ → cho đi qua
         }
 
         // Tầng 0: ALLOWED → redirect + ghi analytics
@@ -77,7 +97,12 @@ public class RedirectController {
             if (referrer == null)
                 referrer = request.getHeader("Referrer");
             String deviceType = (userAgent != null && userAgent.contains("Mobile")) ? "Mobile" : "Desktop";
-            String country = request.getLocale().getCountry();
+            // Bug fix: getLocale().getCountry() trả về ngôn ngữ trình duyệt, KHÔNG phải quốc gia
+            // Ưu tiên CF-IPCountry (Cloudflare), fallback Unknown
+            String country = request.getHeader("CF-IPCountry");
+            if (country == null || country.isBlank() || "XX".equals(country)) {
+                country = "Unknown";
+            }
 
             analyticsService.recordClick(link, ipAddress, userAgent, referrer, deviceType, country);
         }
@@ -100,56 +125,74 @@ public class RedirectController {
         ));
     }
 
+    /**
+     * Unlock endpoint: nhận mật khẩu qua JSON body (POST), trả về HMAC token ngắn hạn.
+     *
+     * Frontend nhận token rồi redirect tới /r/{code}?t=<token> để hoàn tất.
+     * Mật khẩu KHÔNG bao giờ xuất hiện trên URL.
+     *
+     * Rate limiting:
+     * - Chỉ đếm lần SAI (lần đúng không tăng counter)
+     * - 5 lần sai / phút / (IP + code)
+     * - 20 lần sai / phút / code (chống distributed brute-force)
+     * - Fail-closed: nếu Redis lỗi, dùng in-memory fallback
+     */
     @org.springframework.web.bind.annotation.PostMapping("/r/{shortCode}/unlock")
     public ResponseEntity<?> unlockLink(
             @PathVariable String shortCode,
             @org.springframework.web.bind.annotation.RequestBody Map<String, String> body,
             HttpServletRequest request) {
-        String rawIp = extractClientIp(request);
-        String ipAddress = RateLimiterService.normalizeIp(rawIp);
+        // Dùng getRemoteAddr() — Tomcat đã xử lý trusted proxy headers
+        String ipAddress = RateLimiterService.normalizeIp(request.getRemoteAddr());
 
-        // Chống brute-force mật khẩu bằng Rate Limiter
-        RateLimitAction action = rateLimiterService.checkAndIncrement(ipAddress, "unlock:" + shortCode);
-        if (action == RateLimitAction.BLOCKED) {
+        // Kiểm tra brute-force limit TRƯỚC KHI verify mật khẩu (tránh tốn CPU cho BCrypt)
+        if (rateLimiterService.isUnlockBlocked(ipAddress, shortCode)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of(
                     "error", "Too Many Requests",
-                    "message", "Bạn đã thử sai quá nhiều lần. Vui lòng chờ 10 giây rồi thử lại.",
-                    "retryAfterSeconds", 10
+                    "message", "Bạn đã thử sai quá nhiều lần. Vui lòng chờ 1 phút rồi thử lại.",
+                    "retryAfterSeconds", 60
             ));
         }
 
-        Link link = linkService.getLinkByShortCode(shortCode);
+        // Lấy link (validate active/expired/banned)
+        linkService.getLinkByShortCode(shortCode);
+
         String password = body != null ? body.getOrDefault("password", "") : "";
 
-        if (!linkService.verifyPassword(link, password)) {
+        // Verify mật khẩu (đọc hash trực tiếp từ DB, không qua cache)
+        if (!linkService.verifyPassword(shortCode, password)) {
+            // Chỉ đếm lần SAI (không đếm lần đúng)
+            rateLimiterService.recordUnlockFailure(ipAddress, shortCode);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
                     "success", false,
                     "message", "Mật khẩu không chính xác. Vui lòng kiểm tra lại!"
             ));
         }
 
-        // Mật khẩu đúng -> Ghi nhận lượt click analytics
+        // Mật khẩu đúng → Tạo HMAC unlock token (TTL = 60 giây, gắn với shortCode)
+        String unlockToken = unlockTokenService.generateToken(shortCode);
+
+        // Ghi nhận analytics cho lượt click (chỉ khi rate limit cho phép)
+        RateLimitAction action = rateLimiterService.checkAndIncrement(ipAddress, shortCode);
         if (action == RateLimitAction.ALLOWED) {
+            Link link = linkService.getLinkByShortCode(shortCode);
             String userAgent = request.getHeader("User-Agent");
             String referrer = request.getHeader("Referer");
             if (referrer == null)
                 referrer = request.getHeader("Referrer");
             String deviceType = (userAgent != null && userAgent.contains("Mobile")) ? "Mobile" : "Desktop";
-            String country = request.getLocale().getCountry();
+            String country = request.getHeader("CF-IPCountry");
+            if (country == null || country.isBlank() || "XX".equals(country)) {
+                country = "Unknown";
+            }
             analyticsService.recordClick(link, ipAddress, userAgent, referrer, deviceType, country);
         }
 
+        // Trả token + redirect URL cho frontend
         return ResponseEntity.ok(Map.of(
                 "success", true,
-                "originalUrl", link.getOriginalUrl()
+                "token", unlockToken,
+                "redirectUrl", "/r/" + shortCode + "?t=" + unlockToken
         ));
-    }
-
-    private String extractClientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim(); // trường hợp qua proxy/load balancer
-        }
-        return request.getRemoteAddr();
     }
 }

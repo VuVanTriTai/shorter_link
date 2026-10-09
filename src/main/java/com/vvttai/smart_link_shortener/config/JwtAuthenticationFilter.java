@@ -6,27 +6,24 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-//  chốt chắn req//user
-import org.springframework.security.core.context.SecurityContext;
-import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import java.util.Collections;
 
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider tokenProvider;
-    private final UserDetailsService userDetailsService;
 
-    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider, UserDetailsService userDetailsService) {
+    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider) {
         this.tokenProvider = tokenProvider;
-        this.userDetailsService = userDetailsService;
     }
 
     @Override
@@ -39,16 +36,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (StringUtils.hasText(token)) {
                 if (tokenProvider.validateToken(token)) {
                     String username = tokenProvider.getUsernameFromToken(token);
-                    UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                    String role = tokenProvider.getRoleFromToken(token);
 
+                    // Tạo authority trực tiếp từ JWT claim — không cần query DB mỗi request
                     UsernamePasswordAuthenticationToken authentication =
-                            new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                            new UsernamePasswordAuthenticationToken(
+                                    username,
+                                    null,
+                                    Collections.singletonList(new SimpleGrantedAuthority(role)));
                     authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
                     SecurityContext context = SecurityContextHolder.createEmptyContext();
                     context.setAuthentication(authentication);
                     SecurityContextHolder.setContext(context);
-                    System.out.println("=== [JwtFilter] Successfully authenticated user: " + username);
+                    System.out.println("=== [JwtFilter] Successfully authenticated user: " + username + " | Role: " + role);
                 } else {
                     System.out.println("=== [JwtFilter] Token validation FAILED");
                 }
@@ -68,4 +69,4 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         return null;
     }
-}
+}

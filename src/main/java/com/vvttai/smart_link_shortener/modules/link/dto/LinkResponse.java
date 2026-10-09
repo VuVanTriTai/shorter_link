@@ -9,6 +9,7 @@ public record LinkResponse (
         String fullShortCode,//Url đầy đủ để coppy luôn
         Long clickCount,
         boolean active,
+        boolean banned,
         LocalDateTime createdAt,
         LocalDateTime expiresAt,
         boolean hasPassword

@@ -78,6 +78,13 @@ public class LinkService {
             shortCode = generateUniqueShortCode();
         }
         Link link = new Link(request.originalUrl(), shortCode, user);
+        // Bug fix: expiresAt từ request trước đây bị bỏ qua hoàn toàn
+        if (request.expiresAt() != null) {
+            if (LocalDateTime.now().isAfter(request.expiresAt())) {
+                throw new IllegalArgumentException("Thời gian hết hạn phải ở trong tương lai!");
+            }
+            link.setExpiresAt(request.expiresAt());
+        }
         if (request.password() != null && !request.password().trim().isEmpty()) {
             link.setPassword(passwordEncoder.encode(request.password().trim()));
         }
@@ -93,6 +100,11 @@ public class LinkService {
         // Tìm link theo shortCode hiện tại + kiểm tra chính chủ
         Link link = linkRepository.findByShortCodeAndUserUsername(currentShortCode, username)
                 .orElseThrow(() -> new IllegalArgumentException("Link không tồn tại hoặc bạn không có quyền sửa!"));
+
+        if (link.isBanned()) {
+            throw new IllegalArgumentException(
+                    "Link này đã bị Quản trị viên khoá (Banned) do vi phạm quy định, bạn không thể chỉnh sửa!");
+        }
 
         // Xóa cache cũ trước khi update (shortCode cũ có thể bị đổi)
         linkCacheService.evict(currentShortCode);
@@ -123,16 +135,7 @@ public class LinkService {
             link.setPassword(passwordEncoder.encode(request.password().trim()));
         }
 
-        return new LinkResponse(
-                link.getId(),
-                link.getOriginalUrl(),
-                link.getShortCode(),
-                fullShortUrl,
-                link.getClickCount(),
-                link.isActive(),
-                link.getCreatedAt(),
-                link.getExpiresAt(),
-                link.hasPassword());
+        return mapToResponse(link);
     }
 
     public List<LinkResponse> getUserLinks(Principal connectedUser) {
@@ -149,6 +152,7 @@ public class LinkService {
                 .toList();
     }
 
+    @Transactional
     public void deleteLink(Long linkId, String username) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("User not found: " + username));
@@ -158,6 +162,7 @@ public class LinkService {
 
         // Xóa cache trước khi delete DB
         linkCacheService.evict(link.getShortCode());
+        clickAnalyticsRepository.deleteByLinkId(link.getId());
         linkRepository.delete(link);
     }
 
@@ -175,15 +180,16 @@ public class LinkService {
 
     private LinkResponse mapToResponse(Link link) {
         String fullShortUrl = "/r/" + link.getShortCode();
-        // Luôn dùng click_analytics trong DB làm nguồn sự thật (chính xác 100%)
-        long actualClicks = clickAnalyticsRepository.countByLinkId(link.getId());
+        // Fix N+1: dùng cột click_count đã được đồng bộ (syncClickCountBatch mỗi 5s)
+        // thay vì gọi COUNT(*) riêng cho từng link → tránh 100 query cho 100 link
         return new LinkResponse(
                 link.getId(),
                 link.getOriginalUrl(),
                 link.getShortCode(),
                 fullShortUrl,
-                actualClicks,
+                link.getClickCount(),
                 link.isActive(),
+                link.isBanned(),
                 link.getCreatedAt(),
                 link.getExpiresAt(),
                 link.hasPassword());
@@ -191,16 +197,21 @@ public class LinkService {
 
     /**
      * Xác thực mật khẩu truy cập của link (dùng BCrypt).
-     * Trả về true nếu link không có mật khẩu hoặc mật khẩu nhập vào khớp.
+     * LUÔN đọc BCrypt hash từ DB (không dùng cache) để:
+     * - Không lưu hash nhạy cảm trong Redis
+     * - Đảm bảo hash luôn mới nhất khi user đổi password
      */
-    public boolean verifyPassword(Link link, String rawPassword) {
-        if (!link.hasPassword()) {
-            return true;
-        }
+    public boolean verifyPassword(String shortCode, String rawPassword) {
         if (rawPassword == null || rawPassword.isBlank()) {
             return false;
         }
-        return passwordEncoder.matches(rawPassword.trim(), link.getPassword());
+        // Đọc hash trực tiếp từ DB
+        Link dbLink = linkRepository.findByShortCode(shortCode)
+                .orElseThrow(() -> new LinkNotFoundException(shortCode));
+        if (!dbLink.hasPassword()) {
+            return true;
+        }
+        return passwordEncoder.matches(rawPassword.trim(), dbLink.getPassword());
     }
 
     /**
@@ -218,14 +229,21 @@ public class LinkService {
         if (cached != null) {
             log.debug("Cache HIT: shortCode={}", shortCode);
             // Validate trạng thái từ cache
-            if (!cached.active()) {
+            if (cached.banned() || !cached.active()) {
                 throw new LinkInactiveException(shortCode);
             }
             if (cached.expiresAt() != null && LocalDateTime.now().isAfter(cached.expiresAt())) {
                 linkCacheService.evict(shortCode); // Xóa cache link hết hạn
                 throw new LinkExpiredException(shortCode);
             }
-            return cached.toEntity();
+            // Link từ cache có password=null (hash không được cache)
+            // Dùng hasPassword flag từ cache để biết link có cần mật khẩu không
+            Link link = cached.toEntity();
+            // Đặt 1 giá trị sentinel để hasPassword() trả đúng khi gọi từ cache
+            if (cached.hasPassword()) {
+                link.setPassword("__CACHED_HAS_PASSWORD__");
+            }
+            return link;
         }
 
         // --- 2. Cache MISS -> Query DB ---
@@ -233,8 +251,8 @@ public class LinkService {
         Link link = linkRepository.findByShortCode(shortCode)
                 .orElseThrow(() -> new LinkNotFoundException(shortCode));
 
-        // Kiểm tra link có bị tắt không
-        if (!link.isActive()) {
+        // Kiểm tra link có bị khoá/tắt không
+        if (link.isBanned() || !link.isActive()) {
             // Cache trạng thái để chống spam DB
             linkCacheService.put(link);
             throw new LinkInactiveException(shortCode);
@@ -246,6 +264,7 @@ public class LinkService {
         }
 
         // --- 3. Put vào cache (TTL = 1 giờ) ---
+        // LinkCacheDto.fromEntity sẽ lưu hasPassword=true/false, KHÔNG lưu hash
         linkCacheService.put(link);
 
         return link;
@@ -261,8 +280,10 @@ public class LinkService {
 
     /**
      * Lấy link để xem thống kê (Analytics).
-     * Khác với getLinkByShortCode() dùng khi redirect, phương thức này KHÔNG ném ngoại lệ
-     * khi link đã hết hạn hoặc tạm tắt, cho phép người dùng vẫn xem được toàn bộ dữ liệu thống kê của link.
+     * Khác với getLinkByShortCode() dùng khi redirect, phương thức này KHÔNG ném
+     * ngoại lệ
+     * khi link đã hết hạn hoặc tạm tắt, cho phép người dùng vẫn xem được toàn bộ dữ
+     * liệu thống kê của link.
      */
     public Link getLinkForStats(String shortCode) {
         // --- 1. Check Redis cache ---
@@ -278,12 +299,26 @@ public class LinkService {
                 .orElseThrow(() -> new LinkNotFoundException(shortCode));
     }
 
+    /**
+     * Lấy link để xem thống kê, có kiểm tra quyền sở hữu.
+     * Chỉ chủ sở hữu (owner) mới được xem analytics của link.
+     * Ngăn chặn IDOR: user A không xem được stats của link do user B tạo.
+     */
+    public Link getLinkForStatsOwnedBy(String shortCode, String username) {
+        return linkRepository.findByShortCodeAndUserUsername(shortCode, username)
+                .orElseThrow(() -> new LinkNotFoundException(shortCode));
+    }
+
     @Transactional
     public LinkResponse setExpirationDate(Long linkId, LocalDateTime expiresAt, String username) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("User not found: " + username));
         Link link = linkRepository.findByIdAndUserId(linkId, user.getId())
                 .orElseThrow(() -> new RuntimeException("Link không tồn tại"));
+
+        if (link.isBanned()) {
+            throw new IllegalArgumentException("Link này đã bị Quản trị viên khoá, không thể chỉnh sửa!");
+        }
 
         if (expiresAt != null && LocalDateTime.now().isAfter(expiresAt)) {
             throw new IllegalArgumentException("Thời gian hết hạn phải ở trong tương lai!");
@@ -304,6 +339,10 @@ public class LinkService {
         Link link = linkRepository.findByIdAndUserId(linkId, user.getId())
                 .orElseThrow(() -> new RuntimeException("Link không tồn tại hoặc bạn không có quyền sửa!"));
 
+        if (link.isBanned()) {
+            throw new IllegalArgumentException("Link này đã bị Quản trị viên khoá (Banned), không thể tự mở lại!");
+        }
+
         link.setActive(active);
         linkRepository.save(link);
 
@@ -319,6 +358,10 @@ public class LinkService {
                 .orElseThrow(() -> new RuntimeException("User not found: " + username));
         Link link = linkRepository.findByIdAndUserId(linkId, user.getId())
                 .orElseThrow(() -> new RuntimeException("Link không tồn tại hoặc bạn không có quyền sửa!"));
+
+        if (link.isBanned()) {
+            throw new IllegalArgumentException("Link này đã bị Quản trị viên khoá (Banned), không thể tự mở lại!");
+        }
 
         link.setActive(!link.isActive());
         linkRepository.save(link);

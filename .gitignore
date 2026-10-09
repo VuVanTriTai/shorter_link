@@ -40,3 +40,8 @@ dist/
 *.env
 *.env.local
 !.env.example
+
+# Binaries / Tools
+cloudflared
+cloudflared.exe
+test.txt
