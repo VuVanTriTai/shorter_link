@@ -1,4 +1,4 @@
-﻿# 🔗 Smart Link Shortener
+# 🔗 Smart Link Shortener
 
 > A production-grade URL shortener built with **Spring Boot 3**, **React**, **Redis**, and **PostgreSQL**.
 > Features a high-throughput analytics pipeline, JWT authentication, rate limiting, and URL safety validation.
@@ -30,7 +30,7 @@
 - **URL Shortening** - custom short codes, expiry dates, click limits
 - **QR Code Generation** - on-demand PNG QR codes per link
 - **High-Throughput Analytics** - Redis Stream + batch pipeline, ~2,300 RPS
-- **Click Tracking** - IP, user-agent, referrer, deduplication via Redis INCR
+- **Click Tracking** - IP, user-agent, referrer, real-time counter via Redis INCR
 - **JWT Authentication** - access token (stateless) + refresh token (Redis, atomic rotation)
 - **Google OAuth2** - one-click social login
 - **Rate Limiting** - per-IP sliding window via Redis
@@ -149,19 +149,17 @@ HTTP 302 → originalUrl
 
 ```
 @Async (does NOT block the redirect response)
-AnalyticsService.recordClick(shortCode, request)
+AnalyticsService.recordClick(link, ip, userAgent, referrer, deviceType, country)
     │
-    ├─► ClickNormalizer  → extract IP, User-Agent, Referrer
-    │
-    ├─► RedisClickCounterService
-    │       INCR  analytics:count:{code}
-    │       SETEX analytics:uniq:{code}:{ip}   (dedup, TTL 24h)
+    ├─► RedisClickCounterService.increment(linkId)
+    │       INCR  analytics:count:{linkId}  (atomic counter < 0.1ms)
     │
     ├─► XADD analytics:click-stream * {payload}
     │       (Redis Stream — ordered, persistent log)
+    │       Trim stream to max 200,000 entries
     │
     └─► [Redis unavailable] → ClickAnalyticsRepository.save()
-            Graceful fallback: direct write to PostgreSQL
+            Graceful fallback: direct write to PostgreSQL + sync count
 ```
 
 ### Phase 3 — Batch Flush to PostgreSQL (every 5s)
