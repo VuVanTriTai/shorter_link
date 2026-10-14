@@ -44,4 +44,5 @@ dist/
 # Binaries / Tools
 cloudflared
 cloudflared.exe
+k6.exe
 test.txt

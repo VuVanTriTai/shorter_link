@@ -1,6 +1,6 @@
 package com.vvttai.smart_link_shortener.modules.admin.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /**
  * DTO trả về thông tin link cho Admin (kèm username chủ sở hữu).
@@ -14,8 +14,8 @@ public record AdminLinkResponse(
         boolean active,
         boolean banned,
         boolean hasPassword,
-        LocalDateTime createdAt,
-        LocalDateTime expiresAt,
+        Instant createdAt,
+        Instant expiresAt,
         // Thông tin chủ sở hữu link
         Long userId,
         String userName

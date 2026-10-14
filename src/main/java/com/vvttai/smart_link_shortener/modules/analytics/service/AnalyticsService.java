@@ -1,166 +1,164 @@
 package com.vvttai.smart_link_shortener.modules.analytics.service;
 
-import com.vvttai.smart_link_shortener.modules.analytics.dto.ClickEventDto;
 import com.vvttai.smart_link_shortener.modules.analytics.entity.ClickAnalytics;
+import com.vvttai.smart_link_shortener.modules.analytics.entity.ClickStats;
 import com.vvttai.smart_link_shortener.modules.analytics.repository.ClickAnalyticsRepository;
+import com.vvttai.smart_link_shortener.modules.analytics.repository.ClickStatsRepository;
 import com.vvttai.smart_link_shortener.modules.link.dto.LinkStatsResponse;
 import com.vvttai.smart_link_shortener.modules.link.entity.Link;
 import com.vvttai.smart_link_shortener.modules.link.repository.LinkRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 
-import java.time.LocalDateTime;
-import java.util.ArrayList;
+import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * Dịch vụ analytics:
+ * <ul>
+ *   <li>{@link #recordClick} — đẩy event vào 2 luồng song song (counter + stream)</li>
+ *   <li>{@link #getLinkStats} — đọc từ bảng tổng hợp {@code click_stats}, không GROUP BY</li>
+ * </ul>
+ */
 @Service
 public class AnalyticsService {
 
     private static final Logger log = LoggerFactory.getLogger(AnalyticsService.class);
-    private static final String REDIS_CLICK_BUFFER_KEY = "analytics:clicks";
-    private static final int BATCH_SIZE = 500;
 
     private final ClickAnalyticsRepository clickAnalyticsRepository;
-    private final LinkRepository linkRepository;
+    private final ClickStatsRepository     clickStatsRepository;
+    private final LinkRepository           linkRepository;
     private final RedisTemplate<String, String> redisTemplate;
-    private final ObjectMapper objectMapper;
+    private final RedisClickCounterService counterService;
+    private final ClickNormalizer          normalizer;
 
     public AnalyticsService(
             ClickAnalyticsRepository clickAnalyticsRepository,
+            ClickStatsRepository clickStatsRepository,
             LinkRepository linkRepository,
-            RedisTemplate<String, String> redisTemplate) {
+            RedisTemplate<String, String> redisTemplate,
+            RedisClickCounterService counterService,
+            ClickNormalizer normalizer) {
         this.clickAnalyticsRepository = clickAnalyticsRepository;
-        this.linkRepository = linkRepository;
-        this.redisTemplate = redisTemplate;
-        this.objectMapper = JsonMapper.builder().findAndAddModules().build();
+        this.clickStatsRepository     = clickStatsRepository;
+        this.linkRepository           = linkRepository;
+        this.redisTemplate            = redisTemplate;
+        this.counterService           = counterService;
+        this.normalizer               = normalizer;
     }
 
+    // =========================================================================
+    // Luồng ghi nhận click
+    // =========================================================================
+
     /**
-     * Ghi nhận lượt click bất đồng bộ:
-     * Đẩy ClickEventDto vào Redis List buffer trong < 1ms (không block request, không nghẽn DB connection).
+     * Ghi nhận lượt click bất đồng bộ — không block redirect request.
+     *
+     * <ol>
+     *   <li><b>Luồng 1:</b> {@code INCR analytics:count:{linkId}} — cập nhật bộ đếm
+     *       real-time trong Redis (atomic, &lt; 0.1ms).</li>
+     *   <li><b>Luồng 2:</b> {@code XADD analytics:click-stream} — đẩy event vào
+     *       Redis Stream để {@link AnalyticsBatchProcessor} xử lý theo batch.</li>
+     * </ol>
+     *
+     * <p>Nếu Redis hoàn toàn không khả dụng, fallback ghi trực tiếp vào DB.</p>
      */
     @Async
-    public void recordClick(Link link, String ipAddress, String userAgent, String referrer, String deviceType,
-            String country) {
+    public void recordClick(Link link, String ipAddress, String userAgent,
+                            String referrer, String deviceType, String country) {
+        boolean redisOk = false;
         try {
-            ClickEventDto dto = new ClickEventDto(
-                    link.getId(),
-                    LocalDateTime.now(),
-                    ipAddress,
-                    userAgent,
-                    referrer,
-                    deviceType,
-                    country
+            // Luồng 1: INCR counter
+            counterService.increment(link.getId());
+
+            // Luồng 2: XADD stream
+            Map<String, String> fields = Map.of(
+                    "linkId",    String.valueOf(link.getId()),
+                    "clickedAt", Instant.now().toString(),
+                    "ip",        nvl(ipAddress),
+                    "ua",        nvl(userAgent),
+                    "referrer",  nvl(referrer),
+                    "device",    nvl(deviceType),
+                    "country",   nvl(country)
             );
-            String json = objectMapper.writeValueAsString(dto);
-            redisTemplate.opsForList().rightPush(REDIS_CLICK_BUFFER_KEY, json);
-            log.debug("Buffered click event for linkId={}", link.getId());
+            redisTemplate.opsForStream().add(
+                    org.springframework.data.redis.connection.stream.MapRecord.create(
+                            AnalyticsBatchProcessor.STREAM_KEY, fields));
+
+            // Giới hạn kích thước stream tránh bộ nhớ Redis phình to
+            redisTemplate.opsForStream().trim(
+                    AnalyticsBatchProcessor.STREAM_KEY, 200_000L, true);
+
+            redisOk = true;
+            log.debug("Pushed click event to stream for linkId={}", link.getId());
         } catch (Exception e) {
-            log.warn("Failed to push click event to Redis buffer: {}. Fallback direct DB save.", e.getMessage());
-            // Fallback lưu trực tiếp vào DB nếu Redis gặp sự cố
+            log.warn("Redis unavailable, falling back to direct DB write: {}", e.getMessage());
+        }
+
+        // Fallback: ghi thẳng vào DB nếu Redis không khả dụng
+        if (!redisOk) {
             try {
-                ClickAnalytics analytics = new ClickAnalytics(link, ipAddress, userAgent, referrer, deviceType, country);
+                String normalizedDevice   = normalizer.normalizeDeviceType(userAgent);
+                String normalizedReferrer = normalizer.normalizeReferrer(referrer);
+                String normalizedCountry  = normalizer.normalizeCountry(country);
+
+                ClickAnalytics analytics = new ClickAnalytics(
+                        link, ipAddress, userAgent,
+                        normalizedReferrer, normalizedDevice, normalizedCountry);
                 clickAnalyticsRepository.save(analytics);
+
+                // Sync click_count trực tiếp
                 long total = clickAnalyticsRepository.countByLinkId(link.getId());
                 linkRepository.syncClickCount(link.getId(), total);
             } catch (Exception ex) {
-                log.error("Direct DB save failed: {}", ex.getMessage());
+                log.error("Fallback direct DB save failed for linkId={}: {}", link.getId(), ex.getMessage());
             }
         }
     }
+
+    // =========================================================================
+    // Query dashboard
+    // =========================================================================
 
     /**
-     * Background Job chạy định kỳ mỗi 5 giây:
-     * Đọc batch từ Redis List buffer -> Batch INSERT vào bảng click_analytics + Batch UPDATE click_count trên bảng links.
+     * Trả về thống kê tổng hợp của một link.
+     *
+     * <p>Đọc từ {@code click_stats} (đã tổng hợp sẵn) thay vì chạy GROUP BY
+     * trên toàn bộ {@code click_analytics} — nhanh bất kể có bao nhiêu click.</p>
+     *
+     * <p>totalClicks ưu tiên Redis counter (real-time), fallback về
+     * {@code links.click_count} (đã sync).</p>
      */
-    @Scheduled(fixedDelay = 5000)
-    @Transactional
-    public void flushClickBuffer() {
-        Long queueSize = redisTemplate.opsForList().size(REDIS_CLICK_BUFFER_KEY);
-        if (queueSize == null || queueSize == 0) {
-            return;
-        }
-
-        int fetchCount = (int) Math.min(queueSize, BATCH_SIZE);
-        List<String> rawEvents = new ArrayList<>(fetchCount);
-
-        for (int i = 0; i < fetchCount; i++) {
-            String item = redisTemplate.opsForList().leftPop(REDIS_CLICK_BUFFER_KEY);
-            if (item == null) break;
-            rawEvents.add(item);
-        }
-
-        if (rawEvents.isEmpty()) return;
-
-        List<ClickAnalytics> analyticsList = new ArrayList<>(rawEvents.size());
-        Set<Long> affectedLinkIds = new java.util.LinkedHashSet<>();
-
-        for (String raw : rawEvents) {
-            try {
-                ClickEventDto dto = objectMapper.readValue(raw, ClickEventDto.class);
-                Link linkRef = linkRepository.getReferenceById(dto.linkId());
-                ClickAnalytics entity = new ClickAnalytics(
-                        linkRef,
-                        dto.clickedAt(),
-                        dto.ipAddress(),
-                        dto.userAgent(),
-                        dto.referrer(),
-                        dto.deviceType(),
-                        dto.country()
-                );
-                analyticsList.add(entity);
-                affectedLinkIds.add(dto.linkId());
-            } catch (Exception e) {
-                log.warn("Failed to deserialize click event: {}", e.getMessage());
-            }
-        }
-
-        if (analyticsList.isEmpty()) return;
-
-        // 1. Batch insert vào click_analytics
-        try {
-            clickAnalyticsRepository.saveAll(analyticsList);
-            clickAnalyticsRepository.flush();
-        } catch (Exception e) {
-            log.error("saveAll click_analytics failed, events may be lost: {}", e.getMessage(), e);
-            return; // dừng — không sync click_count nếu insert chưa thành công
-        }
-
-        // 2. Sync click_count bằng 1 SQL duy nhất (correlated subquery)
-        // UPDATE links SET click_count = (SELECT COUNT(*) FROM click_analytics WHERE link_id = id)
-        // WHERE id IN (:affectedLinkIds)
-        // → O(1) query, self-healing: dù click_count trước đó sai bao nhiêu cũng tự sửa
-        try {
-            linkRepository.syncClickCountBatch(affectedLinkIds);
-        } catch (Exception e) {
-            log.warn("Failed to batch sync click_count: {}", e.getMessage());
-        }
-
-        log.info("Flushed {} click events. Synced click_count for {} links.",
-                analyticsList.size(), affectedLinkIds.size());
-    }
-
     public LinkStatsResponse getLinkStats(Link link) {
-        long totalClicks = clickAnalyticsRepository.countByLinkId(link.getId());
+        // 1. Total clicks: Redis counter → fallback DB
+        Long redisCount = counterService.get(link.getId());
+        long totalClicks = (redisCount != null)
+                ? redisCount
+                : link.getClickCount() != null ? link.getClickCount() : 0L;
 
-        // 1. Thống kê theo ngày để vẽ biểu đồ
-        List<LinkStatsResponse.DailyClickStats> dailyClicks = clickAnalyticsRepository
-                .findDailyClicksByLinkId(link.getId())
-                .stream()
-                .map(p -> new LinkStatsResponse.DailyClickStats(p.getClickDate(), p.getClickCount()))
+        // 2. Đọc toàn bộ click_stats của link (1 query)
+        List<ClickStats> statsList = clickStatsRepository.findByLinkId(link.getId());
+
+        Map<String, Long> deviceStats   = filterStats(statsList, "DEVICE");
+        Map<String, Long> countryStats  = filterStats(statsList, "COUNTRY");
+        Map<String, Long> referrerStats = filterStats(statsList, "REFERRER");
+
+        // Daily clicks: lấy từ DAILY stats, sắp xếp theo ngày
+        List<LinkStatsResponse.DailyClickStats> dailyClicks = statsList.stream()
+                .filter(s -> "DAILY".equals(s.getStatType()))
+                .sorted(Comparator.comparing(ClickStats::getLabel))
+                .map(s -> new LinkStatsResponse.DailyClickStats(s.getLabel(), s.getTotal()))
                 .toList();
 
-        // 2. Lấy danh sách các lượt click gần nhất (tối đa 30 lượt)
+        // 3. Recent clicks: top 30 từ click_analytics (raw data, không tốn nhiều)
         List<ClickAnalytics> recentList = clickAnalyticsRepository
                 .findTop30ByLinkIdOrderByClickedAtDesc(link.getId());
 
@@ -168,36 +166,11 @@ public class AnalyticsService {
                 .map(c -> new LinkStatsResponse.RecentClickDto(
                         c.getClickedAt(),
                         maskIpAddress(c.getIpAddress()),
-                        c.getDeviceType() != null && !c.getDeviceType().isBlank() ? c.getDeviceType() : "Unknown",
-                        c.getCountry() != null && !c.getCountry().isBlank() ? c.getCountry() : "Unknown",
-                        c.getReferrer() != null && !c.getReferrer().isBlank() ? c.getReferrer() : "Direct",
-                        c.getUserAgent()
-                ))
+                        c.getDeviceType()  != null && !c.getDeviceType().isBlank()  ? c.getDeviceType()  : "Unknown",
+                        c.getCountry()     != null && !c.getCountry().isBlank()     ? c.getCountry()     : "Unknown",
+                        c.getReferrer()    != null && !c.getReferrer().isBlank()    ? c.getReferrer()    : "Direct",
+                        c.getUserAgent()))
                 .toList();
-
-        // 3. Thống kê tỷ lệ thiết bị — GROUP BY trên TOÀN BỘ click (không chỉ 30 click gần nhất)
-        Map<String, Long> deviceStats = clickAnalyticsRepository.countByDeviceType(link.getId())
-                .stream()
-                .collect(Collectors.toMap(
-                        ClickAnalyticsRepository.StatsProjection::getLabel,
-                        ClickAnalyticsRepository.StatsProjection::getTotal
-                ));
-
-        // 4. Thống kê theo quốc gia — GROUP BY trên TOÀN BỘ click
-        Map<String, Long> countryStats = clickAnalyticsRepository.countByCountry(link.getId())
-                .stream()
-                .collect(Collectors.toMap(
-                        ClickAnalyticsRepository.StatsProjection::getLabel,
-                        ClickAnalyticsRepository.StatsProjection::getTotal
-                ));
-
-        // 5. Thống kê theo nguồn truy cập (Referrer) — GROUP BY trên TOÀN BỘ click
-        Map<String, Long> referrerStats = clickAnalyticsRepository.countByReferrer(link.getId())
-                .stream()
-                .collect(Collectors.toMap(
-                        ClickAnalyticsRepository.StatsProjection::getLabel,
-                        ClickAnalyticsRepository.StatsProjection::getTotal
-                ));
 
         return new LinkStatsResponse(
                 link.getShortCode(),
@@ -214,18 +187,25 @@ public class AnalyticsService {
         );
     }
 
-    public org.springframework.data.domain.Page<LinkStatsResponse.RecentClickDto> getPaginatedClicks(
-            Link link,
-            org.springframework.data.domain.Pageable pageable) {
+    public Page<LinkStatsResponse.RecentClickDto> getPaginatedClicks(Link link, Pageable pageable) {
         return clickAnalyticsRepository.findByLinkIdOrderByClickedAtDesc(link.getId(), pageable)
                 .map(c -> new LinkStatsResponse.RecentClickDto(
                         c.getClickedAt(),
                         maskIpAddress(c.getIpAddress()),
-                        c.getDeviceType() != null && !c.getDeviceType().isBlank() ? c.getDeviceType() : "Unknown",
-                        c.getCountry() != null && !c.getCountry().isBlank() ? c.getCountry() : "Unknown",
-                        c.getReferrer() != null && !c.getReferrer().isBlank() ? c.getReferrer() : "Direct",
-                        c.getUserAgent()
-                ));
+                        c.getDeviceType()  != null && !c.getDeviceType().isBlank()  ? c.getDeviceType()  : "Unknown",
+                        c.getCountry()     != null && !c.getCountry().isBlank()     ? c.getCountry()     : "Unknown",
+                        c.getReferrer()    != null && !c.getReferrer().isBlank()    ? c.getReferrer()    : "Direct",
+                        c.getUserAgent()));
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    private Map<String, Long> filterStats(List<ClickStats> all, String statType) {
+        return all.stream()
+                .filter(s -> statType.equals(s.getStatType()))
+                .collect(Collectors.toMap(ClickStats::getLabel, ClickStats::getTotal));
     }
 
     /**
@@ -235,16 +215,14 @@ public class AnalyticsService {
      */
     private String maskIpAddress(String ip) {
         if (ip == null || ip.isBlank()) return ip;
-        // IPv4
         int lastDot = ip.lastIndexOf('.');
-        if (lastDot > 0) {
-            return ip.substring(0, lastDot) + ".***";
-        }
-        // IPv6
+        if (lastDot > 0) return ip.substring(0, lastDot) + ".***";
         int lastColon = ip.lastIndexOf(':');
-        if (lastColon > 0) {
-            return ip.substring(0, lastColon) + ":****";
-        }
+        if (lastColon > 0) return ip.substring(0, lastColon) + ":****";
         return "***";
+    }
+
+    private static String nvl(String s) {
+        return s != null ? s : "";
     }
 }

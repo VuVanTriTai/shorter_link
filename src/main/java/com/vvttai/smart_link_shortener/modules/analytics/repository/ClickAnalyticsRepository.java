@@ -4,84 +4,55 @@ import com.vvttai.smart_link_shortener.modules.analytics.entity.ClickAnalytics;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 public interface ClickAnalyticsRepository extends JpaRepository<ClickAnalytics, Long> {
 
     long countByLinkId(Long linkId);
 
-    @org.springframework.data.jpa.repository.Modifying
+    @Modifying
     @org.springframework.transaction.annotation.Transactional
     @Query("DELETE FROM ClickAnalytics c WHERE c.link.id = :linkId")
     void deleteByLinkId(@Param("linkId") Long linkId);
-
-    @Query("SELECT c FROM ClickAnalytics c WHERE c.link.id = :linkId ORDER BY c.clickedAt DESC")
-    List<ClickAnalytics> findByLinkId(@Param("linkId") Long linkId);
 
     List<ClickAnalytics> findTop30ByLinkIdOrderByClickedAtDesc(Long linkId);
 
     Page<ClickAnalytics> findByLinkIdOrderByClickedAtDesc(Long linkId, Pageable pageable);
 
-    @Query("SELECT c FROM ClickAnalytics c WHERE c.link.id = :linkId and c.clickedAt BETWEEN :from and :to")
-    List<ClickAnalytics> findByLinkIdAndDateRange(
-            @Param("linkId") Long linkId,
-            @Param("from") LocalDateTime from,
-            @Param("to") LocalDateTime to
+    /**
+     * Batch INSERT với ON CONFLICT DO NOTHING dựa trên stream_msg_id (partial unique index).
+     * Đảm bảo idempotency: retry message từ Redis Stream không tạo bản ghi duplicate.
+     *
+     * <p>Dùng UNNEST để tránh N INSERT riêng lẻ — 1 câu SQL duy nhất cho toàn batch.</p>
+     */
+    @Modifying
+    @Query(value = """
+            INSERT INTO click_analytics
+                (link_id, clicked_at, ip_address, user_agent, referrer, device_type, country, stream_msg_id)
+            SELECT
+                unnest(:linkIds::bigint[]),
+                unnest(:clickedAts::timestamptz[]),
+                unnest(:ipAddresses::text[]),
+                unnest(:userAgents::text[]),
+                unnest(:referrers::text[]),
+                unnest(:deviceTypes::text[]),
+                unnest(:countries::text[]),
+                unnest(:streamMsgIds::text[])
+            ON CONFLICT (stream_msg_id) WHERE stream_msg_id IS NOT NULL
+            DO NOTHING
+            """, nativeQuery = true)
+    int batchInsertWithIdempotency(
+            @Param("linkIds")       Long[]    linkIds,
+            @Param("clickedAts")    String[]  clickedAts,
+            @Param("ipAddresses")   String[]  ipAddresses,
+            @Param("userAgents")    String[]  userAgents,
+            @Param("referrers")     String[]  referrers,
+            @Param("deviceTypes")   String[]  deviceTypes,
+            @Param("countries")     String[]  countries,
+            @Param("streamMsgIds")  String[]  streamMsgIds
     );
-
-    // Thống kê số lượt click theo từng ngày (dùng để vẽ biểu đồ truy cập)
-    @Query(value = """
-            SELECT TO_CHAR(c.clicked_at, 'YYYY-MM-DD') AS clickDate, COUNT(*) AS clickCount
-            FROM click_analytics c
-            WHERE c.link_id = :linkId
-            GROUP BY TO_CHAR(c.clicked_at, 'YYYY-MM-DD')
-            ORDER BY clickDate ASC
-            """, nativeQuery = true)
-    List<DailyClickProjection> findDailyClicksByLinkId(@Param("linkId") Long linkId);
-
-    // Projection interface để Spring Data JPA tự động map kết quả thống kê
-    interface DailyClickProjection {
-        String getClickDate();
-        Long getClickCount();
-    }
-
-    // Projection interface cho thống kê GROUP BY (device, country, referrer)
-    interface StatsProjection {
-        String getLabel();
-        Long getTotal();
-    }
-
-    // Thống kê thiết bị trên TOÀN BỘ click (không phải chỉ 30 click gần nhất)
-    @Query(value = """
-            SELECT COALESCE(NULLIF(TRIM(c.device_type), ''), 'Unknown') AS label, COUNT(*) AS total
-            FROM click_analytics c
-            WHERE c.link_id = :linkId
-            GROUP BY label
-            ORDER BY total DESC
-            """, nativeQuery = true)
-    List<StatsProjection> countByDeviceType(@Param("linkId") Long linkId);
-
-    // Thống kê quốc gia trên TOÀN BỘ click
-    @Query(value = """
-            SELECT COALESCE(NULLIF(TRIM(c.country), ''), 'Unknown') AS label, COUNT(*) AS total
-            FROM click_analytics c
-            WHERE c.link_id = :linkId
-            GROUP BY label
-            ORDER BY total DESC
-            """, nativeQuery = true)
-    List<StatsProjection> countByCountry(@Param("linkId") Long linkId);
-
-    // Thống kê nguồn truy cập (referrer) trên TOÀN BỘ click
-    @Query(value = """
-            SELECT COALESCE(NULLIF(TRIM(c.referrer), ''), 'Direct') AS label, COUNT(*) AS total
-            FROM click_analytics c
-            WHERE c.link_id = :linkId
-            GROUP BY label
-            ORDER BY total DESC
-            """, nativeQuery = true)
-    List<StatsProjection> countByReferrer(@Param("linkId") Long linkId);
 }

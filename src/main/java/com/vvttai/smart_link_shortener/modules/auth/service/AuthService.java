@@ -111,7 +111,7 @@ public class AuthService {
             Optional<User> existingByEmail = userRepository.findByEmailAndDeletedFalse(googleUser.email());
 
             if (existingByEmail.isEmpty()) {
-                // Tìm thêm theo username = email (trường hợp user cũ chưa có field email)
+            // Tìm thêm theo username = email (trường hợp user cũ chưa có field email)
                 existingByEmail = userRepository.findByUsernameAndDeletedFalse(googleUser.email());
             }
 

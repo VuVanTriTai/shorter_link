@@ -75,7 +75,7 @@ export default function Login() {
                     window.google.accounts.id.renderButton(googleBtnRef.current, {
                         theme: 'outline',
                         size: 'large',
-                        width: '100%',
+                        width: 380,
                         text: 'signin_with',
                         shape: 'rectangular',
                         logo_alignment: 'left',

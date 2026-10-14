@@ -43,16 +43,16 @@ public class User {
     /**
      * Tài khoản bị khoá bởi Admin (không thể đăng nhập).
      */
-    @Column(name = "locked", nullable = false)
+    @Column(name = "locked", nullable = false, columnDefinition = "boolean default false")
     private boolean locked = false;
 
     /**
      * Soft-delete: đánh dấu tài khoản đã bị xoá nhưng vẫn giữ data link cũ.
      */
-    @Column(name = "deleted", nullable = false)
+    @Column(name = "deleted", nullable = false, columnDefinition = "boolean default false")
     private boolean deleted = false;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false, columnDefinition = "timestamp default now()")
     private LocalDateTime createdAt;
 
     @PrePersist

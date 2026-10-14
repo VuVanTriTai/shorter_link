@@ -65,7 +65,7 @@ export default function Register() {
                     window.google.accounts.id.renderButton(googleBtnRef.current, {
                         theme: 'outline',
                         size: 'large',
-                        width: '100%',
+                        width: 380,
                         text: 'signup_with',
                         shape: 'rectangular',
                         logo_alignment: 'left',

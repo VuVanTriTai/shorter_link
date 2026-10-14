@@ -53,7 +53,8 @@ public class SecurityConfig {
                             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                             response.setContentType("application/json;charset=UTF-8");
                             response.getWriter().write("{\"message\": \"Bạn không có quyền truy cập tài nguyên này (yêu cầu quyền ADMIN)\"}");
-                        }));
+                        })
+                );
 
         http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();

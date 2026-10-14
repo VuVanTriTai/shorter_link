@@ -61,7 +61,7 @@ public class LinkController {
     @PatchMapping("/{id}/expiration")
     public ResponseEntity<LinkResponse> setExpiration(
             @PathVariable Long id,
-            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) LocalDateTime expiresAt,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) java.time.Instant expiresAt,
             Principal connectedUser) {
         LinkResponse response = linkService.setExpirationDate(id, expiresAt, connectedUser.getName());
         return ResponseEntity.ok(response);

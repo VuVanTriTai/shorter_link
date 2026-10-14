@@ -1,7 +1,7 @@
 package com.vvttai.smart_link_shortener.modules.link.dto;
 
 import com.vvttai.smart_link_shortener.modules.link.entity.Link;
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /**
  * DTO nhe de cache Link vao Redis.
@@ -19,10 +19,23 @@ public record LinkCacheDto(
         Long clickCount,
         boolean active,
         boolean banned,
-        LocalDateTime createdAt,
-        LocalDateTime expiresAt,
+        Instant createdAt,
+        Instant expiresAt,
         boolean hasPassword
 ) {
+    public static final Long NOT_FOUND_ID = -1L;
+
+    /**
+     * DTO sentinel đại diện cho kết quả "link không tồn tại" (Negative Caching).
+     */
+    public static LinkCacheDto notFound() {
+        return new LinkCacheDto(NOT_FOUND_ID, "", "", 0L, false, false, null, null, false);
+    }
+
+    public boolean isNotFound() {
+        return NOT_FOUND_ID.equals(this.id);
+    }
+
     /**
      * Chuyen tu Link entity sang LinkCacheDto de luu vao Redis.
      */

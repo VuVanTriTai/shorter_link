@@ -6,7 +6,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Entity
 @Table(name = "links")
@@ -27,16 +27,13 @@ public class Link {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "user_name")
-    private String userName;
-
     @Column(name = "click_count", nullable = false)
     private Long clickCount = 0L;
 
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
-    @Column(name = "banned", nullable = false)
+    @Column(name = "banned", nullable = false, columnDefinition = "boolean default false")
     private boolean banned = false;
 
     @OneToMany(mappedBy = "link", cascade = CascadeType.ALL, orphanRemoval = true)
@@ -44,53 +41,28 @@ public class Link {
 
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     @LastModifiedDate
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
 
     @Column(name = "expires_at")
-    private LocalDateTime expiresAt;
+    private Instant expiresAt;
 
-    @Column(name = "password")
-    private String password;
-
-    @PrePersist
-    public void prePersist() {
-        if (this.createdAt == null) {
-            this.createdAt = LocalDateTime.now();
-        }
-        if (this.updatedAt == null) {
-            this.updatedAt = LocalDateTime.now();
-        }
-        if (this.clickCount == null) {
-            this.clickCount = 0L;
-        }
-        if (this.userName == null && this.user != null) {
-            this.userName = this.user.getUsername();
-        }
-    }
-
-    @PreUpdate
-    public void preUpdate() {
-        this.updatedAt = LocalDateTime.now();
-    }
+    @Column(name = "access_password_hash")
+    private String accessPasswordHash;
 
     public Link() {
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
+        // Constructor rỗng không tự gán createdAt = now() để không làm sai lệch toEntity()
     }
 
     public Link(String originalUrl, String shortCode, User user) {
         this.originalUrl = originalUrl;
         this.shortCode = shortCode;
         this.user = user;
-        this.userName = user != null ? user.getUsername() : null;
         this.clickCount = 0L;
         this.active = true;
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
     }
 
     // Getters and Setters
@@ -126,12 +98,11 @@ public class Link {
         this.user = user;
     }
 
+    /**
+     * Lấy username trực tiếp qua quan hệ với User entity (tránh denormalize lệch dữ liệu).
+     */
     public String getUserName() {
-        return userName;
-    }
-
-    public void setUserName(String userName) {
-        this.userName = userName;
+        return user != null ? user.getUsername() : null;
     }
 
     public Long getClickCount() {
@@ -158,39 +129,47 @@ public class Link {
         this.banned = banned;
     }
 
-    public LocalDateTime getCreatedAt() {
+    public Instant getCreatedAt() {
         return createdAt;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
+    public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
     }
 
-    public LocalDateTime getUpdatedAt() {
+    public Instant getUpdatedAt() {
         return updatedAt;
     }
 
-    public void setUpdatedAt(LocalDateTime updatedAt) {
+    public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
     }
 
-    public LocalDateTime getExpiresAt() {
+    public Instant getExpiresAt() {
         return expiresAt;
     }
 
-    public void setExpiresAt(LocalDateTime expiresAt) {
+    public void setExpiresAt(Instant expiresAt) {
         this.expiresAt = expiresAt;
     }
 
     public String getPassword() {
-        return password;
+        return accessPasswordHash;
     }
 
     public void setPassword(String password) {
-        this.password = password;
+        this.accessPasswordHash = password;
+    }
+
+    public String getAccessPasswordHash() {
+        return accessPasswordHash;
+    }
+
+    public void setAccessPasswordHash(String accessPasswordHash) {
+        this.accessPasswordHash = accessPasswordHash;
     }
 
     public boolean hasPassword() {
-        return password != null && !password.isBlank();
+        return accessPasswordHash != null && !accessPasswordHash.isBlank();
     }
 }

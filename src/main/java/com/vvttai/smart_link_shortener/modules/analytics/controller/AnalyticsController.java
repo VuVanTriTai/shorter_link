@@ -34,11 +34,6 @@ public class AnalyticsController {
     public ResponseEntity<LinkStatsResponse> getLinkStats(
             @PathVariable String shortCode,
             Principal principal) {
-        try {
-            analyticsService.flushClickBuffer();
-        } catch (Exception e) {
-            log.warn("Failed to flush click buffer before fetching stats: {}", e.getMessage());
-        }
         // Kiểm tra chủ sở hữu: chỉ owner mới được xem stats
         Link link = linkService.getLinkForStatsOwnedBy(shortCode, principal.getName());
         LinkStatsResponse response = analyticsService.getLinkStats(link);
@@ -56,11 +51,6 @@ public class AnalyticsController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             Principal principal) {
-        try {
-            analyticsService.flushClickBuffer();
-        } catch (Exception e) {
-            log.warn("Failed to flush click buffer before fetching clicks: {}", e.getMessage());
-        }
         // Kiểm tra chủ sở hữu: chỉ owner mới được xem clicks
         Link link = linkService.getLinkForStatsOwnedBy(shortCode, principal.getName());
         size = Math.min(Math.max(size, 5), 100);
